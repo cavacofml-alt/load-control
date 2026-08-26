@@ -1,4 +1,4 @@
-from core.models import AircraftEnvelope
+from core.models import AircraftEnvelope, CargoHold
 
 
 class AHM565Parser:
@@ -30,3 +30,14 @@ class AHM565Parser:
             c_constant=2500.0,
             reference_station=36.35,
         )
+
+    def parse_cargo_holds(self) -> list[CargoHold]:
+        # TODO: parsing real da Secção D (Holds and Compartments).
+        # Para já, devolve os porões reais do TC-JNH / frota 333A-B (Sheet D2, Lower Deck).
+        return [
+            CargoHold(hold_code="CPT1", hold_type="LOWER", max_weight=10206.0, balance_arm=17.125),
+            CargoHold(hold_code="CPT2", hold_type="LOWER", max_weight=20412.0, balance_arm=24.575),
+            CargoHold(hold_code="CPT3", hold_type="LOWER", max_weight=9522.0, balance_arm=44.650),
+            CargoHold(hold_code="CPT4", hold_type="LOWER", max_weight=10206.0, balance_arm=49.600),
+            CargoHold(hold_code="CPT5", hold_type="LOWER", max_weight=3468.0, balance_arm=54.267),
+        ]

@@ -1,4 +1,4 @@
-from core.models import AircraftEnvelope
+from core.models import AircraftEnvelope, CargoHold
 
 
 class BalanceCalculator:
@@ -21,6 +21,21 @@ class BalanceCalculator:
         """Calcula a %MAC (Mean Aerodynamic Chord) com base no CG atual."""
         mac_perc = ((cg - self.aircraft.lemac) / self.aircraft.mac_length) * 100
         return round(mac_perc, 2)
+
+    def calculate_lizfw(self, loads: dict[str, float], cargo_holds: list[CargoHold]) -> float:
+        """Calcula o Loaded Index at Zero Fuel Weight (LIZFW).
+
+        Soma ao DOI a contribuição de índice de cada porão carregado (deadload),
+        usando o "index per weight unit" da posição: (balance_arm - reference_station) / C.
+        `loads` mapeia hold_code -> peso (kg) carregado nesse porão.
+        """
+        holds_by_code = {hold.hold_code: hold for hold in cargo_holds}
+        index_delta = 0.0
+        for hold_code, weight in loads.items():
+            hold = holds_by_code[hold_code]
+            index_per_weight_unit = (hold.balance_arm - self.aircraft.reference_station) / self.aircraft.c_constant
+            index_delta += weight * index_per_weight_unit
+        return round(self.aircraft.doi + index_delta, 5)
 
     def check_weight_limits(self, zfw: float, tow: float, law: float) -> dict:
         """Valida os pesos contra os limites estruturais da aeronave."""

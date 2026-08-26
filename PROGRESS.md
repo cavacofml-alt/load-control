@@ -54,11 +54,26 @@ Registo do que foi feito, decisão a decisão. Atualizado a cada trabalho releva
 - `AircraftProfile` existe mas ainda não é usado por nenhum parser real (ambos devolvem só `AircraftEnvelope`) — é preparação para quando o parsing de zonas/holds (Secção D) for implementado, não uma peça funcional ainda.
 - O `ahm560_parser.py` é um esqueleto vazio de propósito — não há nenhuma amostra real de mensagem telex AHM 560 ainda para desenhar o parsing; implementar isso agora seria adivinhar a estrutura.
 
+## 2026-08-27 (cont.) — Fase 3: Hold Management, deadload no motor de cálculo
+
+- **`ahm565_parser.py`**: adicionado `parse_cargo_holds()` — devolve os 5 porões reais do TC-JNH/frota 333A-B (Sheet D2, Lower Deck): CPT1 (FWD, 10206kg, arm 17.125), CPT2 (FWD, 20412kg, arm 24.575), CPT3 (AFT, 9522kg, arm 44.650), CPT4 (AFT, 10206kg, arm 49.600), CPT5 (BULK, 3468kg, arm 54.267).
+- **`BalanceCalculator.calculate_lizfw(loads, cargo_holds)`**: novo método — soma ao DOI a contribuição de índice de cada porão carregado, usando `index_per_weight_unit = (balance_arm - reference_station) / C`. Esta fórmula foi validada diretamente contra os valores "Index per wt unit" publicados no manual (CPT1: -0.00769, CPT5: +0.00717 — batem exatos).
+- **Teste** (`test_deadload_lizfw_and_maczfw`): simula 2000kg em CPT1 + 1000kg em CPT5, recalcula LIZFW e %MACZFW, e confirma que o resultado bate com uma segunda implementação independente da mesma fórmula oficial (não só com o próprio código).
+- `CargoHold` (Pydantic) já suportava este mapeamento sem alterações — não mudei o schema.
+
+### A minha opinião no momento
+
+- Não mudei `CargoHold.hold_type` para distinguir FWD/AFT/BULK — o schema atual só tem `LOWER`/`MAIN` (nível de deck), e os 5 porões são todos `LOWER`. A distinção FWD/AFT/BULK importa na prática (bulk não aceita ULD, só carga solta) mas é informação de posição/secção, não de tipo de deck — fica para quando desenharmos o Hold Management UI (Fase 3 seguinte), não para o motor matemático.
+- `calculate_lizfw` recebe `cargo_holds` como parâmetro em vez de vir do `self.aircraft` — mantém o `BalanceCalculator` construído só com `AircraftEnvelope` (sem quebrar os testes já existentes) e falta decidir se, a prazo, o calculator deve passar a aceitar `AircraftProfile` completo em vez de `AircraftEnvelope` + holds soltos.
+- MACZFW ainda não tem um método próprio — reutilizei `calculate_cg` + `calculate_mac_percentage` diretamente. Não criei `calculate_maczfw` porque seria só uma composição de duas chamadas já existentes.
+
 ## Próximos passos possíveis (não decididos)
 
 - [ ] Parsing real de secções do AHM 565 (C: index/MAC/CG limits; D: holds/cabin; E: DOW/DOI por registration) em vez de dados hardcoded
 - [ ] Endpoint de ingestão (`POST /api/v1/aircraft/ahm565`) para validar `AircraftProfile`/`AircraftEnvelope` via API antes de gravar no Supabase
 - [ ] Estrutura real de mensagem telex para `ahm560_parser.py` (falta uma amostra real)
+- [ ] Decidir se `BalanceCalculator` passa a trabalhar sobre `AircraftProfile` (envelope + holds) em vez de `AircraftEnvelope` sozinho
+- [ ] Validação de `max_weight` por porão ao aplicar deadload (`calculate_lizfw` ainda não rejeita sobrecarga de um CPT)
 - [ ] EZFW/TOW/LAW acumulados a partir de PNL/ADL
 - [ ] Testes unitários adicionais (casos-limite: pesos negativos, índice extremo)
 - [ ] Fluxo de onboarding/convite para atribuir `airline_id` a novos `profiles`
