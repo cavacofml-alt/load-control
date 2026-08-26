@@ -4,45 +4,45 @@ from core.calculator import BalanceCalculator
 
 
 @pytest.fixture
-def a320_envelope():
-    # Dados realistas aproximados de um A320
+def tcjnh_envelope():
+    # Dados reais: Turkish Airlines AHM565, A330-300, registration TC-JNH
+    # (THY-AHM565_A330-300_Rev10_12Sep2023.pdf, Secções C4/E5/F1)
     return AircraftEnvelope(
-        registration="CS-TQA",
-        type_designator="A320-214",
-        mzfw=62500.0,
-        mtow=77000.0,
-        mlaw=66000.0,
-        dow=42500.0,
-        doi=45.0,
-        reference_station=16.0,  # Metros a partir do nariz
-        lemac=17.5,
-        mac_length=4.19,
-        k_constant=50.0,
-        c_constant=1000.0
+        registration="TC-JNH",
+        type_designator="A330-300",
+        mzfw=175000.0,
+        mtow=233000.0,
+        mlaw=187000.0,
+        dow=125187.0,
+        doi=89.2,
+        reference_station=36.35,
+        lemac=34.532,
+        mac_length=7.27,
+        k_constant=100.0,
+        c_constant=2500.0,
     )
 
 
-def test_cg_and_mac_calculation(a320_envelope):
-    calc = BalanceCalculator(a320_envelope)
+def test_cg_and_mac_calculation(tcjnh_envelope):
+    calc = BalanceCalculator(tcjnh_envelope)
 
-    # Usando um total_index de 198.0, matematicamente o CG deve cair
-    # perto dos 18.55m, resultando num MAC de aproximadamente 25.1%.
-    cg = calc.calculate_cg(total_weight=58000.0, total_index=198.0)
+    # Ponto real publicado no manual (Secção C, Sheet 5 — CG Limits, frota 333A):
+    # a ZFW=175000kg, o limite forward é %MAC=19.3 / Index=70.83.
+    cg = calc.calculate_cg(total_weight=175000.0, total_index=70.83)
     mac = calc.calculate_mac_percentage(cg)
 
-    assert cg > 16.0
-    assert 15.0 <= mac <= 40.0
+    # CG deve cair dentro do envelope físico do MAC (entre o LEMAC e LEMAC+mac_length)
+    assert tcjnh_envelope.lemac < cg < tcjnh_envelope.lemac + tcjnh_envelope.mac_length
+    # Tolerância alinhada com a nota do próprio manual (+/- 0.3 de índice é aceitável)
+    assert abs(mac - 19.3) < 0.1
 
-    # Validação estrita do resultado esperado
-    assert round(mac, 1) == 25.1
 
-
-def test_weight_limits(a320_envelope):
-    calc = BalanceCalculator(a320_envelope)
-    limits = calc.check_weight_limits(zfw=60000.0, tow=75000.0, law=65000.0)
+def test_weight_limits(tcjnh_envelope):
+    calc = BalanceCalculator(tcjnh_envelope)
+    limits = calc.check_weight_limits(zfw=170000.0, tow=230000.0, law=185000.0)
     assert limits["all_cleared"] is True
 
-    # Testar falha de MTOW
-    limits_overweight = calc.check_weight_limits(zfw=60000.0, tow=78000.0, law=65000.0)
+    # Testar falha de MTOW (limite real: 233000 kg)
+    limits_overweight = calc.check_weight_limits(zfw=170000.0, tow=234000.0, law=185000.0)
     assert limits_overweight["tow_ok"] is False
     assert limits_overweight["all_cleared"] is False

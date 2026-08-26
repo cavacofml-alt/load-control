@@ -37,9 +37,28 @@ Registo do que foi feito, decisão a decisão. Atualizado a cada trabalho releva
 - `profiles.airline_id` é opcional (`REFERENCES airlines(id)`, sem `NOT NULL`) porque o fluxo de convite/onboarding ainda não existe — um utilizador pode ter conta sem airline atribuída ainda. Isto tem de ser fechado antes de haver sign-up público.
 - Ainda não criei a tabela de regras DGR nem o `MessageGateway` — ficou combinado que a prioridade agora era só o modelo de dados de users/flights/loadsheets.
 
+## 2026-08-27 (cont.) — Parser AHM 560/565 e dados reais (em curso)
+
+- **Documento de referência recebido**: `THY-AHM565_A330-300_Rev10_12Sep2023.pdf` (Turkish Airlines, A330-300, ~112 páginas) — schema semipermanente real: fórmula de Índice/MAC, limites de CG, holds/ULDs, fuel tables, DOW/DOI por registration, pesos limite por frota.
+- **Correção de nomenclatura**: o parser estava a ser chamado `ahm560.py` mas o documento de referência é o **AHM 565** (Semi-Permanent Data, formato estruturado), não o AHM 560 (mensagem telex). Arquitetura clarificada: são dois adapters diferentes, não um erro de digitação —
+  - `parsers/ahm560_parser.py` — adapter para telex AHM 560 (**esqueleto só**, `NotImplementedError`, estrutura de campos ainda por definir)
+  - `parsers/ahm565_parser.py` — adapter para o documento estruturado AHM 565 (contém a lógica/dados reais)
+  - ambos devem convergir no mesmo modelo interno, `AircraftProfile`.
+- **`core/models.py`**: adicionado `CabinZone`, `CargoHold`, e `AircraftProfile` (fonte de verdade interna, agnóstica do formato de origem — `envelope: AircraftEnvelope` + `cabin_zones` + `cargo_holds`). Os parsers ainda devolvem só `AircraftEnvelope`; `AircraftProfile` fica pronto para quando os parsers extraírem zonas/holds reais.
+- **Dados reais injetados** (`ahm565_parser.py`): substituído o A320 fictício pelo perfil real do **TC-JNH** (A330-300, frota TK 333A) — `mzfw=175000`, `mtow=233000`, `mlaw=187000`, `dow=125187`, `doi=89.2`, `reference_station=36.35`, `lemac=34.532`, `mac_length=7.27`, `k_constant=100`, `c_constant=2500` (Secções C4/E5/F1 do manual).
+- **Testes validados contra dado publicado real** (não inventado): a Secção C, Sheet 5 do manual publica, para ZFW=175000kg, o limite forward de %MAC=19.3 (Index=70.83). O `BalanceCalculator` com os dados reais do TC-JNH reproduz 19.27% — a ±0.03pp do publicado, dentro da tolerância que o próprio manual assume (±0.3 de índice por arredondamento do DCS). **Primeira validação do motor contra a fonte real**, não só contra os próprios testes.
+
+### A minha opinião no momento
+
+- A fórmula do `%MAC`/`CG` que já tínhamos implementado (antes de ver este documento) bate certo estruturalmente com a fórmula oficial do AHM 565 (Secção C, Sheet 4) — não foi preciso mudar a matemática, só as constantes. Isso é um bom sinal de que a base está correta.
+- `AircraftProfile` existe mas ainda não é usado por nenhum parser real (ambos devolvem só `AircraftEnvelope`) — é preparação para quando o parsing de zonas/holds (Secção D) for implementado, não uma peça funcional ainda.
+- O `ahm560_parser.py` é um esqueleto vazio de propósito — não há nenhuma amostra real de mensagem telex AHM 560 ainda para desenhar o parsing; implementar isso agora seria adivinhar a estrutura.
+
 ## Próximos passos possíveis (não decididos)
 
-- [ ] Parser AHM 560 real (regex sobre secções AH/AL)
+- [ ] Parsing real de secções do AHM 565 (C: index/MAC/CG limits; D: holds/cabin; E: DOW/DOI por registration) em vez de dados hardcoded
+- [ ] Endpoint de ingestão (`POST /api/v1/aircraft/ahm565`) para validar `AircraftProfile`/`AircraftEnvelope` via API antes de gravar no Supabase
+- [ ] Estrutura real de mensagem telex para `ahm560_parser.py` (falta uma amostra real)
 - [ ] EZFW/TOW/LAW acumulados a partir de PNL/ADL
 - [ ] Testes unitários adicionais (casos-limite: pesos negativos, índice extremo)
 - [ ] Fluxo de onboarding/convite para atribuir `airline_id` a novos `profiles`

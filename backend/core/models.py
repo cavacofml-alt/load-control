@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -22,3 +24,25 @@ class AircraftEnvelope(BaseModel):
 
     # Constantes de Cálculo de MAC e Datum
     reference_station: float = Field(..., description="Reference Station (Datum)")
+
+
+class CabinZone(BaseModel):
+    zone_code: str = Field(..., max_length=2)
+    max_capacity: int = Field(..., gt=0)
+    balance_arm: float
+
+
+class CargoHold(BaseModel):
+    hold_code: str = Field(..., max_length=10)
+    hold_type: Literal["LOWER", "MAIN"]
+    max_weight: float = Field(..., gt=0)
+    balance_arm: float
+
+
+class AircraftProfile(BaseModel):
+    """Fonte de verdade interna da aplicação, independente do formato de origem
+    (AHM 560 telex, AHM 565 estruturado, ou outros formatos proprietários)."""
+
+    envelope: AircraftEnvelope
+    cabin_zones: list[CabinZone] = Field(default_factory=list)
+    cargo_holds: list[CargoHold] = Field(default_factory=list)
