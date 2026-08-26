@@ -1,5 +1,66 @@
 from core.models import AircraftEnvelope, CabinZone, CargoHold, UldPosition
 
+# Pesos máximos standard das posições de ULD (Sheet D3) — consistentes em quase
+# todas as baias do Lower Deck do A330-300.
+LATERAL_MAX_WEIGHT = 1587.0  # AKE/PKC
+CENTRAL_MAX_WEIGHT = 3174.0  # PLA
+PALLET_MAX_WEIGHT = 5103.0  # PMC (nota: um PAG real na mesma posição tem limite de 4626kg)
+
+# (bay_number, centroid L/R/central, centroid P ou None se a baia não tiver
+# posição de palete grande, hold_code do porão a que a baia pertence)
+FORWARD_HOLD_BAYS = [
+    ("11", 15.432, 15.885, "CPT1"),
+    ("12", 17.218, 18.349, "CPT1"),
+    ("13", 18.801, None, "CPT1"),
+    ("21", 20.563, 20.812, "CPT2"),
+    ("22", 22.146, 23.276, "CPT2"),
+    ("23", 23.728, 25.740, "CPT2"),
+    ("24", 25.491, 28.203, "CPT2"),
+    ("25", 27.073, None, "CPT2"),
+    ("26", 28.655, None, "CPT2"),
+]
+
+AFT_HOLD_BAYS = [
+    # 31P excluído de propósito: na frota 333A/333B (grupo de registration do
+    # TC-JNH), essa posição está ocupada pelo Lower Deck Crew Rest Container
+    # (LDCRC) e não está disponível para carga (Sheet D3, nota da AFT hold).
+    ("31", 40.889, None, "CPT3"),
+    ("32", 43.352, 43.805, "CPT3"),
+    ("33", 44.935, 46.065, "CPT3"),
+    ("34", 46.517, None, "CPT3"),
+    ("41", 48.077, 48.326, "CPT4"),
+    ("42", 49.659, 50.790, "CPT4"),
+    ("43", 51.241, None, "CPT4"),
+]
+
+
+def _build_bay_positions(bay_number: str, centroid_lr: float, centroid_p: float | None) -> list[UldPosition]:
+    """Gera as posições de uma baia (L, R, central, e P se existir) com as
+    exclusões mútuas corretas: as laterais (L/R) são independentes entre si
+    mas bloqueiam a central e a P; a central e a P bloqueiam tudo o resto
+    da baia (paletes de largura total)."""
+    codes = [f"{bay_number}L", f"{bay_number}R", bay_number]
+    if centroid_p is not None:
+        codes.append(f"{bay_number}P")
+
+    positions = []
+    for code in codes:
+        if code.endswith("P"):
+            max_weight, balance_arm = PALLET_MAX_WEIGHT, centroid_p
+            exclusions = [c for c in codes if c != code]
+        elif code == f"{bay_number}L" or code == f"{bay_number}R":
+            max_weight, balance_arm = LATERAL_MAX_WEIGHT, centroid_lr
+            # As laterais não se excluem entre si, só com a central e a P
+            exclusions = [c for c in codes if c != code and c not in (f"{bay_number}L", f"{bay_number}R")]
+        else:
+            max_weight, balance_arm = CENTRAL_MAX_WEIGHT, centroid_lr
+            exclusions = [c for c in codes if c != code]
+
+        positions.append(
+            UldPosition(position_code=code, max_weight=max_weight, balance_arm=balance_arm, mutually_exclusive_with=exclusions)
+        )
+    return positions
+
 
 class AHM565Parser:
     """Adapter para o formato AHM 565 (documento estruturado de dados semipermanentes).
@@ -33,23 +94,18 @@ class AHM565Parser:
 
     def parse_cargo_holds(self) -> list[CargoHold]:
         # TODO: parsing real da Secção D (Holds and Compartments).
-        # Para já, devolve os porões reais do TC-JNH / frota 333A-B (Sheet D2, Lower Deck).
-        #
-        # CPT1 inclui as posições de ULD reais da baia 11 (Sheet D3, Hold FORWARD):
-        # 11L/11R (laterais, AKE/PKC) e 11/11P (centrais, largura total — PLA/PAG/PMC).
-        # NOTA: o limite de 11P (5103kg) usa o valor do PMC; um PAG real nessa posição
-        # tem limite de 4626kg — o schema atual não distingue por tipo de ULD carregado.
-        cpt1_uld_positions = [
-            UldPosition(position_code="11L", max_weight=1587.0, balance_arm=15.432, mutually_exclusive_with=["11", "11P"]),
-            UldPosition(position_code="11R", max_weight=1587.0, balance_arm=15.432, mutually_exclusive_with=["11", "11P"]),
-            UldPosition(position_code="11", max_weight=3174.0, balance_arm=15.432, mutually_exclusive_with=["11L", "11R", "11P"]),
-            UldPosition(position_code="11P", max_weight=5103.0, balance_arm=15.885, mutually_exclusive_with=["11L", "11R", "11"]),
-        ]
+        # Para já, devolve os porões reais do TC-JNH / frota 333A-B (Sheet D2,
+        # Lower Deck), com o mapa completo de posições de ULD (Sheet D3/D3.1)
+        # associado a cada porão.
+        positions_by_hold: dict[str, list[UldPosition]] = {"CPT1": [], "CPT2": [], "CPT3": [], "CPT4": []}
+        for bay_number, centroid_lr, centroid_p, hold_code in FORWARD_HOLD_BAYS + AFT_HOLD_BAYS:
+            positions_by_hold[hold_code].extend(_build_bay_positions(bay_number, centroid_lr, centroid_p))
+
         return [
-            CargoHold(hold_code="CPT1", hold_type="LOWER", max_weight=10206.0, balance_arm=17.125, uld_positions=cpt1_uld_positions),
-            CargoHold(hold_code="CPT2", hold_type="LOWER", max_weight=20412.0, balance_arm=24.575),
-            CargoHold(hold_code="CPT3", hold_type="LOWER", max_weight=9522.0, balance_arm=44.650),
-            CargoHold(hold_code="CPT4", hold_type="LOWER", max_weight=10206.0, balance_arm=49.600),
+            CargoHold(hold_code="CPT1", hold_type="LOWER", max_weight=10206.0, balance_arm=17.125, uld_positions=positions_by_hold["CPT1"]),
+            CargoHold(hold_code="CPT2", hold_type="LOWER", max_weight=20412.0, balance_arm=24.575, uld_positions=positions_by_hold["CPT2"]),
+            CargoHold(hold_code="CPT3", hold_type="LOWER", max_weight=9522.0, balance_arm=44.650, uld_positions=positions_by_hold["CPT3"]),
+            CargoHold(hold_code="CPT4", hold_type="LOWER", max_weight=10206.0, balance_arm=49.600, uld_positions=positions_by_hold["CPT4"]),
             CargoHold(hold_code="CPT5", hold_type="LOWER", max_weight=3468.0, balance_arm=54.267),
         ]
 

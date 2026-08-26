@@ -94,10 +94,22 @@ Registo do que foi feito, decisão a decisão. Atualizado a cada trabalho releva
 - `validate_hold_overlap` é uma função solta, não um método do `BalanceCalculator` — não precisa de `self.aircraft`, e mantém-se testável isoladamente do resto do motor.
 - Só a baia 11 (CPT1) tem posições reais mapeadas; CPT2-CPT5 continuam só com o `max_weight`/`balance_arm` agregado do porão, sem posições internas.
 
+## 2026-08-27 (cont.) — Fase 3 completa: mapa integral do Lower Deck (CPT1-CPT4)
+
+- **`ahm565_parser.py`**: generalizado `_build_bay_positions(bay_number, centroid_lr, centroid_p)` — gera automaticamente L/R/central/P de qualquer baia com as exclusões mútuas corretas (laterais independentes entre si, central e P bloqueiam tudo). `parse_cargo_holds()` agora popula **58 posições de ULD reais** em CPT1-CPT4, a partir das tabelas `FORWARD_HOLD_BAYS` (baias 11-26) e `AFT_HOLD_BAYS` (baias 31-43), Sheet D3/D3.1 do manual.
+- **Testes** (`tests/test_uld_full_deck.py`, 7 casos): confirma o total de 58 posições, exclusões dinâmicas em baias de porões diferentes (24 em CPT2, 42 em CPT4), baias sem posição P (13, 25, 26, 34, 43), e que baias de porões diferentes não interferem entre si. Suite completa: **19/19 testes a passar**.
+- **Correção de dados face ao pedido**: excluí `31P` do mapa do TC-JNH. O manual (Sheet D3, remarks) diz que essa posição está ocupada pelo *Lower Deck Crew Rest Container* (LDCRC) na frota 333A/333B — o registration group do TC-JNH. A frota 333D (nota equivalente no manual) não tem essa restrição. Tratar 31P como carregável para o TC-JNH seria um erro real, não cosmético.
+
+### A minha opinião no momento
+
+- Não critiquei a instrução original de "os pesos são consistentes em quase todo o lado (1587/3174/5103)" — confirmei isso é verdade para todas as 16 baias mapeadas, por isso a generalização com 3 constantes fixas (`LATERAL_MAX_WEIGHT`, `CENTRAL_MAX_WEIGHT`, `PALLET_MAX_WEIGHT`) é válida sem exceções neste deck.
+- A limitação já registada (limite de posições `P` usar o valor do PMC, não o do PAG) agora aplica-se a **6 posições diferentes** (11P, 12P, 21P, 22P, 23P, 24P, 32P, 33P, 41P, 42P — todas as baias com P), não só à 11P. Continua por resolver, mas o impacto está mais visível agora que o mapa é completo.
+- Não liguei ainda `validate_hold_overlap` ao `calculate_lizfw` — continuam a ser dois mecanismos independentes. Isto já estava registado abaixo e mantém-se válido para todo o deck, não só para a baia 11.
+
 ## Próximos passos possíveis (não decididos)
 
-- [ ] Modelar as restantes baias (12, 13, 21-26, etc.) com as mesmas regras de overlap
-- [ ] Compatibilidade exata ULD↔posição por tipo (AKE/PKC/PLA/PAG/PMC), incluindo o limite de peso correto por tipo em posições partilhadas como `11P`
+- [ ] Compatibilidade exata ULD↔posição por tipo (AKE/PKC/PLA/PAG/PMC), incluindo o limite de peso correto por tipo em posições partilhadas (11P, 12P, 21P-24P, 32P, 33P, 41P, 42P)
+- [ ] Mapear o Main Deck / Bulk (CPT5) e a baia 13/25/26/34/43 sem posição P confirmar se aceitam algum ULD alternativo
 - [ ] Ligar `validate_hold_overlap` ao fluxo de `calculate_lizfw` (hoje são independentes — nada impede calcular o LIZFW com um overlap não validado)
 - [ ] Parsing real de secções do AHM 565 (C: index/MAC/CG limits; D: holds/cabin; E: DOW/DOI por registration) em vez de dados hardcoded
 - [ ] Endpoint de ingestão (`POST /api/v1/aircraft/ahm565`) para validar `AircraftProfile`/`AircraftEnvelope` via API antes de gravar no Supabase
