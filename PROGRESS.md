@@ -81,8 +81,24 @@ Registo do que foi feito, decisão a decisão. Atualizado a cada trabalho releva
 - Os códigos de zona no pedido vinham como "OA/OB/OC" (letra O); o documento real usa "0A/0B/0C" (zero). Usei a grafia do documento.
 - `_resolve_pax_weight` aceita tanto uma contagem por tipo (`{"ADULT": 20}`, usa pesos standard) como um peso já conhecido em kg — para quando o peso real dos passageiros de uma zona for capturado (ex.: PNL/ADL com pesos declarados), sem forçar sempre o standard.
 
+## 2026-08-27 (cont.) — Fase 3 (correção): posições de ULD e overlap na baia 11
+
+- **`core/models.py`**: novo `UldPosition` (`position_code`, `max_weight`, `balance_arm`, `mutually_exclusive_with`). `CargoHold` ganhou `uld_positions: list[UldPosition]`.
+- **`ahm565_parser.py`**: `CPT1` passa a incluir as 4 posições reais da baia 11 (Sheet D3, Hold FORWARD): `11L`/`11R` (laterais, AKE/PKC, 1587kg, arm 15.432), `11` (central, PLA, 3174kg, arm 15.432), `11P` (central, PAG/PMC, 5103kg, arm 15.885).
+- **`validate_hold_overlap(hold_loads, uld_positions)`** (`core/calculator.py`): lança `ValueError` se duas posições carregadas em simultâneo forem mutuamente exclusivas. Peso 0 numa posição não conta como "ocupada".
+- **Testes** (`tests/test_uld_overlap.py`, 8 casos): confirma que 11L+11R coexistem, mas 11L/11R bloqueiam 11 e 11P, e 11/11P se bloqueiam mutuamente. Suite completa: 12/12 testes a passar.
+
+### A minha opinião no momento
+
+- **Limitação conhecida, registada de propósito**: o limite de `11P` (5103kg) usa o valor do PMC, mas um PAG real nessa posição tem limite de só 4626kg. O schema atual não distingue o limite por tipo de ULD efetivamente carregado — só há um `max_weight` fixo por posição. Isto permite, hoje, que o sistema aceite até 5103kg num PAG quando o limite real seria 4626kg. Não é um bug de lógica, é uma limitação de modelo que só é resolvida quando soubermos que *tipo* de ULD está fisicamente em cada posição (ligado à Secção G, ULD Compatibility, que ainda não foi modelada).
+- `validate_hold_overlap` é uma função solta, não um método do `BalanceCalculator` — não precisa de `self.aircraft`, e mantém-se testável isoladamente do resto do motor.
+- Só a baia 11 (CPT1) tem posições reais mapeadas; CPT2-CPT5 continuam só com o `max_weight`/`balance_arm` agregado do porão, sem posições internas.
+
 ## Próximos passos possíveis (não decididos)
 
+- [ ] Modelar as restantes baias (12, 13, 21-26, etc.) com as mesmas regras de overlap
+- [ ] Compatibilidade exata ULD↔posição por tipo (AKE/PKC/PLA/PAG/PMC), incluindo o limite de peso correto por tipo em posições partilhadas como `11P`
+- [ ] Ligar `validate_hold_overlap` ao fluxo de `calculate_lizfw` (hoje são independentes — nada impede calcular o LIZFW com um overlap não validado)
 - [ ] Parsing real de secções do AHM 565 (C: index/MAC/CG limits; D: holds/cabin; E: DOW/DOI por registration) em vez de dados hardcoded
 - [ ] Endpoint de ingestão (`POST /api/v1/aircraft/ahm565`) para validar `AircraftProfile`/`AircraftEnvelope` via API antes de gravar no Supabase
 - [ ] Estrutura real de mensagem telex para `ahm560_parser.py` (falta uma amostra real)

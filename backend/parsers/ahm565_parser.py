@@ -1,4 +1,4 @@
-from core.models import AircraftEnvelope, CabinZone, CargoHold
+from core.models import AircraftEnvelope, CabinZone, CargoHold, UldPosition
 
 
 class AHM565Parser:
@@ -34,8 +34,19 @@ class AHM565Parser:
     def parse_cargo_holds(self) -> list[CargoHold]:
         # TODO: parsing real da Secção D (Holds and Compartments).
         # Para já, devolve os porões reais do TC-JNH / frota 333A-B (Sheet D2, Lower Deck).
+        #
+        # CPT1 inclui as posições de ULD reais da baia 11 (Sheet D3, Hold FORWARD):
+        # 11L/11R (laterais, AKE/PKC) e 11/11P (centrais, largura total — PLA/PAG/PMC).
+        # NOTA: o limite de 11P (5103kg) usa o valor do PMC; um PAG real nessa posição
+        # tem limite de 4626kg — o schema atual não distingue por tipo de ULD carregado.
+        cpt1_uld_positions = [
+            UldPosition(position_code="11L", max_weight=1587.0, balance_arm=15.432, mutually_exclusive_with=["11", "11P"]),
+            UldPosition(position_code="11R", max_weight=1587.0, balance_arm=15.432, mutually_exclusive_with=["11", "11P"]),
+            UldPosition(position_code="11", max_weight=3174.0, balance_arm=15.432, mutually_exclusive_with=["11L", "11R", "11P"]),
+            UldPosition(position_code="11P", max_weight=5103.0, balance_arm=15.885, mutually_exclusive_with=["11L", "11R", "11"]),
+        ]
         return [
-            CargoHold(hold_code="CPT1", hold_type="LOWER", max_weight=10206.0, balance_arm=17.125),
+            CargoHold(hold_code="CPT1", hold_type="LOWER", max_weight=10206.0, balance_arm=17.125, uld_positions=cpt1_uld_positions),
             CargoHold(hold_code="CPT2", hold_type="LOWER", max_weight=20412.0, balance_arm=24.575),
             CargoHold(hold_code="CPT3", hold_type="LOWER", max_weight=9522.0, balance_arm=44.650),
             CargoHold(hold_code="CPT4", hold_type="LOWER", max_weight=10206.0, balance_arm=49.600),

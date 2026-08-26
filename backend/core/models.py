@@ -32,11 +32,23 @@ class CabinZone(BaseModel):
     balance_arm: float
 
 
+class UldPosition(BaseModel):
+    """Posição física de ULD dentro de um porão. Várias posições podem
+    partilhar o mesmo espaço físico (ex.: duas laterais vs. uma central de
+    largura total) — `mutually_exclusive_with` regista essa exclusão."""
+
+    position_code: str = Field(..., max_length=10)
+    max_weight: float = Field(..., gt=0)
+    balance_arm: float
+    mutually_exclusive_with: list[str] = Field(default_factory=list)
+
+
 class CargoHold(BaseModel):
     hold_code: str = Field(..., max_length=10)
     hold_type: Literal["LOWER", "MAIN"]
     max_weight: float = Field(..., gt=0)
     balance_arm: float
+    uld_positions: list[UldPosition] = Field(default_factory=list)
 
 
 class AircraftProfile(BaseModel):

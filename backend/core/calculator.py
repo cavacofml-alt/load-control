@@ -1,4 +1,4 @@
-from core.models import AircraftEnvelope, CabinZone, CargoHold
+from core.models import AircraftEnvelope, CabinZone, CargoHold, UldPosition
 
 # Pesos standard IATA (All flights except holiday charters) — THY AHM565 Sheet B3
 STANDARD_PAX_WEIGHTS = {
@@ -8,6 +8,26 @@ STANDARD_PAX_WEIGHTS = {
     "CHILD": 35.0,
     "INFANT": 10.0,
 }
+
+
+def validate_hold_overlap(hold_loads: dict[str, float], uld_positions: list[UldPosition]) -> None:
+    """Lança ValueError se duas posições carregadas em simultâneo partilharem
+    fisicamente o mesmo espaço num porão (overlap de ULD).
+
+    `hold_loads` mapeia position_code -> peso (kg); só posições com peso > 0
+    contam como "ocupadas" para efeitos de deteção de overlap.
+    """
+    positions_by_code = {position.position_code: position for position in uld_positions}
+    occupied = {code for code, weight in hold_loads.items() if weight > 0}
+
+    for code in occupied:
+        position = positions_by_code[code]
+        conflicts = set(position.mutually_exclusive_with) & occupied
+        if conflicts:
+            raise ValueError(
+                f"Overlap de ULD: a posição '{code}' é incompatível com {sorted(conflicts)} "
+                "— partilham o mesmo espaço físico no porão."
+            )
 
 
 class BalanceCalculator:
