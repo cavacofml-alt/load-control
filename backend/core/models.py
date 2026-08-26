@@ -19,3 +19,6 @@ class AircraftEnvelope(BaseModel):
     mac_length: float = Field(..., gt=0, description="Length of MAC")
     k_constant: float = Field(..., description="K Constant for Index Calculation")
     c_constant: float = Field(..., description="C Constant for Index Calculation")
+
+    # Constantes de Cálculo de MAC e Datum
+    reference_station: float = Field(..., description="Reference Station (Datum)")

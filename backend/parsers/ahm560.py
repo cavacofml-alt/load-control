@@ -19,5 +19,6 @@ class AHM560Parser:
             lemac=17.5,
             mac_length=4.19,
             k_constant=1000.0,
-            c_constant=50.0
+            c_constant=50.0,
+            reference_station=16.0
         )
