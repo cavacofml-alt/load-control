@@ -67,13 +67,27 @@ Registo do que foi feito, decisão a decisão. Atualizado a cada trabalho releva
 - `calculate_lizfw` recebe `cargo_holds` como parâmetro em vez de vir do `self.aircraft` — mantém o `BalanceCalculator` construído só com `AircraftEnvelope` (sem quebrar os testes já existentes) e falta decidir se, a prazo, o calculator deve passar a aceitar `AircraftProfile` completo em vez de `AircraftEnvelope` + holds soltos.
 - MACZFW ainda não tem um método próprio — reutilizei `calculate_cg` + `calculate_mac_percentage` diretamente. Não criei `calculate_maczfw` porque seria só uma composição de duas chamadas já existentes.
 
+## 2026-08-27 (cont.) — Fase 4: Gestão de Passageiros, ZFW end-to-end
+
+- **`ahm565_parser.py`**: adicionado `parse_cabin_zones()` — devolve as 3 zonas reais do TC-JNH na configuração 28C/261Y (Sheet D5, Main deck): `0A` (28 lugares, arm 18.820), `0B` (138 lugares, arm 33.387), `0C` (123 lugares, arm 48.865).
+- **`BalanceCalculator`**: adicionados `calculate_pax_weight(pax_loads)` e `calculate_pax_influence(pax_loads, cabin_zones)`. Usam os pesos standard IATA (`STANDARD_PAX_WEIGHTS`: Adult 84, Male 88, Female 70, Child 35, Infant 10 kg, Sheet B3) por tipo de passageiro, ou o peso real diretamente se for fornecido em vez de uma contagem.
+- **`calculate_lizfw`** generalizado: passa a aceitar `pax_loads`/`cabin_zones` opcionais e soma a contribuição de passageiros à de carga — mantém-se retrocompatível (chamadas antigas com só carga continuam a funcionar, os novos parâmetros são opcionais).
+- **Teste end-to-end** (`test_zfw_end_to_end_with_cargo_and_passengers`): 2000kg no CPT1 + 20/100/100 adultos em 0A/0B/0C → ZFW=145667kg (dentro do MZFW=175000), LIZFW=94.13456, %MACZFW≈23.62%. Validado com uma segunda implementação independente da mesma fórmula.
+- `CabinZone` (Pydantic) já suportava este mapeamento sem alterações — não mudei o schema.
+
+### A minha opinião no momento
+
+- A instrução original dizia "o momento gerado é o Peso × Centroid da Zona" — **isto estava incorreto** e teria dado índices errados por uma ordem de grandeza. Confirmei contra os valores "Index per Weight Unit" publicados no manual (0A: -0.00701, 0B: -0.00119, 0C: +0.00501) que a fórmula certa subtrai a `reference_station` antes de dividir por C — a mesma que já usávamos para os porões. Implementei a versão correta.
+- Os códigos de zona no pedido vinham como "OA/OB/OC" (letra O); o documento real usa "0A/0B/0C" (zero). Usei a grafia do documento.
+- `_resolve_pax_weight` aceita tanto uma contagem por tipo (`{"ADULT": 20}`, usa pesos standard) como um peso já conhecido em kg — para quando o peso real dos passageiros de uma zona for capturado (ex.: PNL/ADL com pesos declarados), sem forçar sempre o standard.
+
 ## Próximos passos possíveis (não decididos)
 
 - [ ] Parsing real de secções do AHM 565 (C: index/MAC/CG limits; D: holds/cabin; E: DOW/DOI por registration) em vez de dados hardcoded
 - [ ] Endpoint de ingestão (`POST /api/v1/aircraft/ahm565`) para validar `AircraftProfile`/`AircraftEnvelope` via API antes de gravar no Supabase
 - [ ] Estrutura real de mensagem telex para `ahm560_parser.py` (falta uma amostra real)
-- [ ] Decidir se `BalanceCalculator` passa a trabalhar sobre `AircraftProfile` (envelope + holds) em vez de `AircraftEnvelope` sozinho
-- [ ] Validação de `max_weight` por porão ao aplicar deadload (`calculate_lizfw` ainda não rejeita sobrecarga de um CPT)
+- [ ] Decidir se `BalanceCalculator` passa a trabalhar sobre `AircraftProfile` (envelope + holds + zonas) em vez de parâmetros soltos
+- [ ] Validação de `max_weight`/`max_capacity` ao aplicar deadload/passageiros (`calculate_lizfw` ainda não rejeita sobrecarga de um CPT ou zona)
 - [ ] EZFW/TOW/LAW acumulados a partir de PNL/ADL
 - [ ] Testes unitários adicionais (casos-limite: pesos negativos, índice extremo)
 - [ ] Fluxo de onboarding/convite para atribuir `airline_id` a novos `profiles`

@@ -1,4 +1,13 @@
-from core.models import AircraftEnvelope, CargoHold
+from core.models import AircraftEnvelope, CabinZone, CargoHold
+
+# Pesos standard IATA (All flights except holiday charters) — THY AHM565 Sheet B3
+STANDARD_PAX_WEIGHTS = {
+    "ADULT": 84.0,
+    "MALE": 88.0,
+    "FEMALE": 70.0,
+    "CHILD": 35.0,
+    "INFANT": 10.0,
+}
 
 
 class BalanceCalculator:
@@ -22,19 +31,63 @@ class BalanceCalculator:
         mac_perc = ((cg - self.aircraft.lemac) / self.aircraft.mac_length) * 100
         return round(mac_perc, 2)
 
-    def calculate_lizfw(self, loads: dict[str, float], cargo_holds: list[CargoHold]) -> float:
+    @staticmethod
+    def _resolve_pax_weight(pax: dict[str, int] | float) -> float:
+        """Resolve o peso total de uma zona de cabine: usa os pesos standard
+        IATA por tipo de passageiro se `pax` for uma contagem (dict), ou usa
+        diretamente o peso já fornecido quando o peso real é conhecido."""
+        if isinstance(pax, dict):
+            return sum(STANDARD_PAX_WEIGHTS[ptype] * count for ptype, count in pax.items())
+        return float(pax)
+
+    def calculate_pax_weight(self, pax_loads: dict[str, dict[str, int] | float]) -> float:
+        """Peso total de todos os passageiros, somado por zona de cabine."""
+        return sum(self._resolve_pax_weight(pax) for pax in pax_loads.values())
+
+    def calculate_pax_influence(
+        self,
+        pax_loads: dict[str, dict[str, int] | float],
+        cabin_zones: list[CabinZone],
+    ) -> float:
+        """Calcula a contribuição de índice (delta) gerada pelos passageiros.
+
+        `pax_loads` mapeia zone_code -> contagem por tipo (ex.: {"ADULT": 20})
+        ou um peso já conhecido em kg, quando o peso real dessa zona é
+        fornecido diretamente em vez de usar os pesos standard IATA.
+        """
+        zones_by_code = {zone.zone_code: zone for zone in cabin_zones}
+        index_delta = 0.0
+        for zone_code, pax in pax_loads.items():
+            zone = zones_by_code[zone_code]
+            zone_weight = self._resolve_pax_weight(pax)
+            index_per_weight_unit = (zone.balance_arm - self.aircraft.reference_station) / self.aircraft.c_constant
+            index_delta += zone_weight * index_per_weight_unit
+        return index_delta
+
+    def calculate_lizfw(
+        self,
+        cargo_loads: dict[str, float],
+        cargo_holds: list[CargoHold],
+        pax_loads: dict[str, dict[str, int] | float] | None = None,
+        cabin_zones: list[CabinZone] | None = None,
+    ) -> float:
         """Calcula o Loaded Index at Zero Fuel Weight (LIZFW).
 
-        Soma ao DOI a contribuição de índice de cada porão carregado (deadload),
-        usando o "index per weight unit" da posição: (balance_arm - reference_station) / C.
-        `loads` mapeia hold_code -> peso (kg) carregado nesse porão.
+        Soma ao DOI a contribuição de índice da carga nos porões (deadload) e,
+        opcionalmente, dos passageiros nas zonas de cabine. Cada contribuição
+        usa o "index per weight unit" da posição: (balance_arm - reference_station) / C.
+        `cargo_loads` mapeia hold_code -> peso (kg) carregado nesse porão.
         """
         holds_by_code = {hold.hold_code: hold for hold in cargo_holds}
         index_delta = 0.0
-        for hold_code, weight in loads.items():
+        for hold_code, weight in cargo_loads.items():
             hold = holds_by_code[hold_code]
             index_per_weight_unit = (hold.balance_arm - self.aircraft.reference_station) / self.aircraft.c_constant
             index_delta += weight * index_per_weight_unit
+
+        if pax_loads:
+            index_delta += self.calculate_pax_influence(pax_loads, cabin_zones or [])
+
         return round(self.aircraft.doi + index_delta, 5)
 
     def check_weight_limits(self, zfw: float, tow: float, law: float) -> dict:

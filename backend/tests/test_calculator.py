@@ -1,6 +1,16 @@
 import pytest
-from core.models import AircraftEnvelope, CargoHold
+from core.models import AircraftEnvelope, CabinZone, CargoHold
 from core.calculator import BalanceCalculator
+
+
+@pytest.fixture
+def tcjnh_cabin_zones():
+    # Dados reais: THY-AHM565_A330-300, Secção D5 (Main deck, config 28C/261Y)
+    return [
+        CabinZone(zone_code="0A", max_capacity=28, balance_arm=18.820),
+        CabinZone(zone_code="0B", max_capacity=138, balance_arm=33.387),
+        CabinZone(zone_code="0C", max_capacity=123, balance_arm=48.865),
+    ]
 
 
 @pytest.fixture
@@ -92,3 +102,49 @@ def test_deadload_lizfw_and_maczfw(tcjnh_envelope, tcjnh_cargo_holds):
     cg_dow_only = calc.calculate_cg(total_weight=tcjnh_envelope.dow, total_index=tcjnh_envelope.doi)
     mac_dow_only = calc.calculate_mac_percentage(cg_dow_only)
     assert mac_zfw != mac_dow_only
+
+
+def test_zfw_end_to_end_with_cargo_and_passengers(tcjnh_envelope, tcjnh_cargo_holds, tcjnh_cabin_zones):
+    calc = BalanceCalculator(tcjnh_envelope)
+
+    cargo_loads = {"CPT1": 2000.0}
+    pax_loads = {"0A": {"ADULT": 20}, "0B": {"ADULT": 100}, "0C": {"ADULT": 100}}
+
+    lizfw = calc.calculate_lizfw(cargo_loads, tcjnh_cargo_holds, pax_loads, tcjnh_cabin_zones)
+
+    pax_weight = calc.calculate_pax_weight(pax_loads)
+    zfw = tcjnh_envelope.dow + sum(cargo_loads.values()) + pax_weight
+
+    # Limite estrutural real do TC-JNH não pode ser excedido
+    limits = calc.check_weight_limits(zfw=zfw, tow=zfw, law=zfw)
+    assert limits["zfw_ok"] is True
+    assert zfw <= tcjnh_envelope.mzfw
+
+    cg_zfw = calc.calculate_cg(total_weight=zfw, total_index=lizfw)
+    mac_zfw = calc.calculate_mac_percentage(cg_zfw)
+
+    # Recalcula tudo de forma independente (mesma fórmula oficial do AHM565)
+    # para confirmar que a combinação carga + passageiros no LIZFW está correta.
+    cargo_by_code = {h.hold_code: h for h in tcjnh_cargo_holds}
+    cargo_delta = sum(
+        weight * ((cargo_by_code[code].balance_arm - tcjnh_envelope.reference_station) / tcjnh_envelope.c_constant)
+        for code, weight in cargo_loads.items()
+    )
+
+    zones_by_code = {z.zone_code: z for z in tcjnh_cabin_zones}
+    STANDARD_ADULT = 84.0
+    pax_delta = sum(
+        (counts["ADULT"] * STANDARD_ADULT)
+        * ((zones_by_code[zone_code].balance_arm - tcjnh_envelope.reference_station) / tcjnh_envelope.c_constant)
+        for zone_code, counts in pax_loads.items()
+    )
+    expected_pax_weight = sum(counts["ADULT"] * STANDARD_ADULT for counts in pax_loads.values())
+    expected_lizfw = round(tcjnh_envelope.doi + cargo_delta + pax_delta, 5)
+    expected_zfw = tcjnh_envelope.dow + sum(cargo_loads.values()) + expected_pax_weight
+
+    assert pax_weight == expected_pax_weight
+    assert zfw == expected_zfw
+    assert lizfw == expected_lizfw
+
+    # %MACZFW tem de cair num envelope de voo fisicamente plausível
+    assert 15.0 <= mac_zfw <= 40.0

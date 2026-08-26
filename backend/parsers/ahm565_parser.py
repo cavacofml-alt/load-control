@@ -1,4 +1,4 @@
-from core.models import AircraftEnvelope, CargoHold
+from core.models import AircraftEnvelope, CabinZone, CargoHold
 
 
 class AHM565Parser:
@@ -40,4 +40,14 @@ class AHM565Parser:
             CargoHold(hold_code="CPT3", hold_type="LOWER", max_weight=9522.0, balance_arm=44.650),
             CargoHold(hold_code="CPT4", hold_type="LOWER", max_weight=10206.0, balance_arm=49.600),
             CargoHold(hold_code="CPT5", hold_type="LOWER", max_weight=3468.0, balance_arm=54.267),
+        ]
+
+    def parse_cabin_zones(self) -> list[CabinZone]:
+        # TODO: parsing real da Secção D5 (Cabin Definitions).
+        # Para já, devolve as zonas reais do TC-JNH na configuração 28C/261Y
+        # (Sheet D5, Main deck, frota 333A-B).
+        return [
+            CabinZone(zone_code="0A", max_capacity=28, balance_arm=18.820),
+            CabinZone(zone_code="0B", max_capacity=138, balance_arm=33.387),
+            CabinZone(zone_code="0C", max_capacity=123, balance_arm=48.865),
         ]
