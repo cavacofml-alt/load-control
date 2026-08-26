@@ -30,6 +30,34 @@ def validate_hold_overlap(hold_loads: dict[str, float], uld_positions: list[UldP
             )
 
 
+def validate_uld_compatibility(hold_loads: dict[str, dict], uld_positions: list[UldPosition]) -> None:
+    """Lança ValueError se uma posição for carregada com um tipo de ULD que
+    não é permitido nessa posição, ou com um peso acima do limite estrutural
+    específico desse tipo.
+
+    `hold_loads` mapeia position_code -> {"uld_type": str, "weight": float}.
+    """
+    positions_by_code = {position.position_code: position for position in uld_positions}
+
+    for code, load in hold_loads.items():
+        position = positions_by_code[code]
+        uld_type = load["uld_type"]
+        weight = load["weight"]
+
+        if uld_type not in position.allowed_ulds:
+            raise ValueError(
+                f"Tipo de ULD '{uld_type}' não é permitido na posição '{code}'. "
+                f"Tipos permitidos: {sorted(position.allowed_ulds)}."
+            )
+
+        max_weight = position.allowed_ulds[uld_type]
+        if weight > max_weight:
+            raise ValueError(
+                f"Peso {weight}kg excede o limite estrutural de {max_weight}kg "
+                f"para '{uld_type}' na posição '{code}'."
+            )
+
+
 class BalanceCalculator:
     def __init__(self, aircraft: AircraftEnvelope):
         self.aircraft = aircraft

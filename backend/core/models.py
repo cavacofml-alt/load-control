@@ -35,11 +35,16 @@ class CabinZone(BaseModel):
 class UldPosition(BaseModel):
     """Posição física de ULD dentro de um porão. Várias posições podem
     partilhar o mesmo espaço físico (ex.: duas laterais vs. uma central de
-    largura total) — `mutually_exclusive_with` regista essa exclusão."""
+    largura total) — `mutually_exclusive_with` regista essa exclusão.
+
+    `allowed_ulds` mapeia tipo de ULD (ex. "AKE", "PMC") -> peso máximo
+    estrutural específico desse tipo nesta posição, em vez de um único limite
+    genérico — posições partilhadas como as "P" aceitam mais que um tipo,
+    cada um com o seu próprio limite (ex.: PAG 4626kg vs. PMC 5103kg)."""
 
     position_code: str = Field(..., max_length=10)
-    max_weight: float = Field(..., gt=0)
     balance_arm: float
+    allowed_ulds: dict[str, float] = Field(..., description="Tipo de ULD -> peso máximo estrutural (kg)")
     mutually_exclusive_with: list[str] = Field(default_factory=list)
 
 

@@ -7,10 +7,10 @@ from core.calculator import validate_hold_overlap
 def cpt1_positions():
     # Dados reais: THY-AHM565_A330-300, Sheet D3 (Hold FORWARD, baia 11)
     return [
-        UldPosition(position_code="11L", max_weight=1587.0, balance_arm=15.432, mutually_exclusive_with=["11", "11P"]),
-        UldPosition(position_code="11R", max_weight=1587.0, balance_arm=15.432, mutually_exclusive_with=["11", "11P"]),
-        UldPosition(position_code="11", max_weight=3174.0, balance_arm=15.432, mutually_exclusive_with=["11L", "11R", "11P"]),
-        UldPosition(position_code="11P", max_weight=5103.0, balance_arm=15.885, mutually_exclusive_with=["11L", "11R", "11"]),
+        UldPosition(position_code="11L", allowed_ulds={"AKE": 1587.0, "PKC": 1587.0}, balance_arm=15.432, mutually_exclusive_with=["11", "11P"]),
+        UldPosition(position_code="11R", allowed_ulds={"AKE": 1587.0, "PKC": 1587.0}, balance_arm=15.432, mutually_exclusive_with=["11", "11P"]),
+        UldPosition(position_code="11", allowed_ulds={"PLA": 3174.0}, balance_arm=15.432, mutually_exclusive_with=["11L", "11R", "11P"]),
+        UldPosition(position_code="11P", allowed_ulds={"PAG": 4626.0, "PMC": 5103.0}, balance_arm=15.885, mutually_exclusive_with=["11L", "11R", "11"]),
     ]
 
 

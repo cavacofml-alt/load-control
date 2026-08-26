@@ -106,11 +106,24 @@ Registo do que foi feito, decisão a decisão. Atualizado a cada trabalho releva
 - A limitação já registada (limite de posições `P` usar o valor do PMC, não o do PAG) agora aplica-se a **6 posições diferentes** (11P, 12P, 21P, 22P, 23P, 24P, 32P, 33P, 41P, 42P — todas as baias com P), não só à 11P. Continua por resolver, mas o impacto está mais visível agora que o mapa é completo.
 - Não liguei ainda `validate_hold_overlap` ao `calculate_lizfw` — continuam a ser dois mecanismos independentes. Isto já estava registado abaixo e mantém-se válido para todo o deck, não só para a baia 11.
 
+## 2026-08-27 (cont.) — Compatibilidade ULD↔tipo e Gatekeeper de validação
+
+- **`UldPosition.max_weight` (float) substituído por `allowed_ulds: dict[str, float]`** (tipo de ULD -> peso máximo específico). Aplicado às **58 posições** de todas as 16 baias (não só à baia 11) — os pesos por tipo (AKE/PKC=1587, PLA=3174, PAG=4626, PMC=5103) são globais no manual (Sheet B5, ULD Specifications), não variam por posição, por isso a generalização cobre o deck todo sem exceções.
+- **`validate_uld_compatibility(hold_loads, uld_positions)`** (`core/calculator.py`): lança `ValueError` se o tipo de ULD não está na lista de tipos permitidos da posição, ou se o peso excede o limite específico desse tipo.
+- **`LoadService`** (`core/load_service.py`) — gatekeeper novo: `calculate_validated_lizfw(hold_loads, cargo_holds, ...)` corre `validate_hold_overlap` e `validate_uld_compatibility` antes de agregar os pesos por porão e chamar `BalanceCalculator.calculate_lizfw`. Se qualquer validação falhar, o cálculo nem chega a correr.
+- **Testes** (`tests/test_uld_compatibility.py`, 6 casos): confirma que um PAG de 4800kg em `11P` é rejeitado (limite real 4626kg) mas um PMC com o mesmo peso é aceite (limite 5103kg); que um PMC não cabe numa posição lateral (só aceita AKE/PKC); e que o `LoadService` bloqueia tanto por overlap como por incompatibilidade antes de calcular o LIZFW. Suite completa: **25/25 testes a passar**.
+- Resolvida a limitação registada nas duas entradas anteriores: o limite de peso das posições `P` já não usa um valor único (PMC) para os dois tipos que aceita — cada tipo tem o seu próprio limite real.
+
+### A minha opinião no momento
+
+- **A limitação passada para a frente**: `LoadService.calculate_validated_lizfw` continua a agregar o peso por porão (`CargoHold.balance_arm`) para chamar o `calculate_lizfw` existente, não pelo `balance_arm` exato de cada posição de ULD. Isto significa que o LIZFW calculado é uma aproximação (usa o centroide médio do porão, ex. CPT2=24.575) mesmo sabendo agora a posição exata (ex. 24P=28.203, bem mais atrás). Reutilizei o método já testado em vez de inventar um novo cálculo por posição — mas isto é uma imprecisão real que vale a pena resolver antes de qualquer loadsheet real sair do sistema.
+- `LoadService` fica num ficheiro novo (`core/load_service.py`) — é uma camada de orquestração/validação, não matemática pura, por isso separei do `calculator.py`.
+- Não toquei no `check_weight_limits` nem no `max_weight` agregado do `CargoHold` (nível do porão) — esse continua um limite único, só as posições de ULD individuais passaram a ser por tipo.
+
 ## Próximos passos possíveis (não decididos)
 
-- [ ] Compatibilidade exata ULD↔posição por tipo (AKE/PKC/PLA/PAG/PMC), incluindo o limite de peso correto por tipo em posições partilhadas (11P, 12P, 21P-24P, 32P, 33P, 41P, 42P)
-- [ ] Mapear o Main Deck / Bulk (CPT5) e a baia 13/25/26/34/43 sem posição P confirmar se aceitam algum ULD alternativo
-- [ ] Ligar `validate_hold_overlap` ao fluxo de `calculate_lizfw` (hoje são independentes — nada impede calcular o LIZFW com um overlap não validado)
+- [ ] Resolver a aproximação do `LoadService`: usar o `balance_arm` exato de cada posição de ULD no LIZFW, não a média do porão
+- [ ] Mapear o Main Deck / Bulk (CPT5) e confirmar se as baias 13/25/26/34/43 (sem posição P) aceitam algum ULD alternativo
 - [ ] Parsing real de secções do AHM 565 (C: index/MAC/CG limits; D: holds/cabin; E: DOW/DOI por registration) em vez de dados hardcoded
 - [ ] Endpoint de ingestão (`POST /api/v1/aircraft/ahm565`) para validar `AircraftProfile`/`AircraftEnvelope` via API antes de gravar no Supabase
 - [ ] Estrutura real de mensagem telex para `ahm560_parser.py` (falta uma amostra real)

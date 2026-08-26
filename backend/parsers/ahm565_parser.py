@@ -1,10 +1,12 @@
 from core.models import AircraftEnvelope, CabinZone, CargoHold, UldPosition
 
-# Pesos máximos standard das posições de ULD (Sheet D3) — consistentes em quase
-# todas as baias do Lower Deck do A330-300.
-LATERAL_MAX_WEIGHT = 1587.0  # AKE/PKC
-CENTRAL_MAX_WEIGHT = 3174.0  # PLA
-PALLET_MAX_WEIGHT = 5103.0  # PMC (nota: um PAG real na mesma posição tem limite de 4626kg)
+# Pesos máximos estruturais por tipo de ULD (Sheet B5 "ULD Specifications" —
+# valores GLOBAIS por tipo, constantes em todas as baias do Lower Deck, não
+# variam por posição). Uma posição "P" aceita tanto PAG como PMC, cada um com
+# o seu próprio limite — não um único limite genérico para a posição.
+LATERAL_ALLOWED_ULDS = {"AKE": 1587.0, "PKC": 1587.0}
+CENTRAL_ALLOWED_ULDS = {"PLA": 3174.0}
+PALLET_ALLOWED_ULDS = {"PAG": 4626.0, "PMC": 5103.0}
 
 # (bay_number, centroid L/R/central, centroid P ou None se a baia não tiver
 # posição de palete grande, hold_code do porão a que a baia pertence)
@@ -46,18 +48,18 @@ def _build_bay_positions(bay_number: str, centroid_lr: float, centroid_p: float 
     positions = []
     for code in codes:
         if code.endswith("P"):
-            max_weight, balance_arm = PALLET_MAX_WEIGHT, centroid_p
+            allowed_ulds, balance_arm = PALLET_ALLOWED_ULDS, centroid_p
             exclusions = [c for c in codes if c != code]
         elif code == f"{bay_number}L" or code == f"{bay_number}R":
-            max_weight, balance_arm = LATERAL_MAX_WEIGHT, centroid_lr
+            allowed_ulds, balance_arm = LATERAL_ALLOWED_ULDS, centroid_lr
             # As laterais não se excluem entre si, só com a central e a P
             exclusions = [c for c in codes if c != code and c not in (f"{bay_number}L", f"{bay_number}R")]
         else:
-            max_weight, balance_arm = CENTRAL_MAX_WEIGHT, centroid_lr
+            allowed_ulds, balance_arm = CENTRAL_ALLOWED_ULDS, centroid_lr
             exclusions = [c for c in codes if c != code]
 
         positions.append(
-            UldPosition(position_code=code, max_weight=max_weight, balance_arm=balance_arm, mutually_exclusive_with=exclusions)
+            UldPosition(position_code=code, balance_arm=balance_arm, allowed_ulds=dict(allowed_ulds), mutually_exclusive_with=exclusions)
         )
     return positions
 
