@@ -120,9 +120,20 @@ Registo do que foi feito, decisão a decisão. Atualizado a cada trabalho releva
 - `LoadService` fica num ficheiro novo (`core/load_service.py`) — é uma camada de orquestração/validação, não matemática pura, por isso separei do `calculator.py`.
 - Não toquei no `check_weight_limits` nem no `max_weight` agregado do `CargoHold` (nível do porão) — esse continua um limite único, só as posições de ULD individuais passaram a ser por tipo.
 
+## 2026-08-27 (cont.) — Correção de precisão: LIZFW por posição de ULD, não por porão
+
+- **`BalanceCalculator.calculate_lizfw_from_positions(position_loads, cargo_holds, ...)`**: novo método — usa o `balance_arm` exato de cada `UldPosition` carregada, em vez do centroide agregado do `CargoHold`. `calculate_lizfw` (nível de porão) mantém-se inalterado e retrocompatível, para quando só se sabe o total por porão, não a posição exata.
+- **`LoadService`** atualizado para chamar `calculate_lizfw_from_positions` — já não agrega por porão (`_aggregate_by_hold` removido, deixou de ser necessário).
+- **Impacto real confirmado por teste**: carregar 4800kg de PMC em `11P` (arm real 15.885) dá LIZFW=**49.9072**; a mesma carga calculada com a média do porão CPT1 (arm 17.125) dava LIZFW=**52.288** — uma diferença de **2.38 pontos de índice**, nada desprezível. `test_load_service_uses_position_arm_not_hold_average` confirma que os dois valores são mesmo diferentes.
+- Suite completa: **26/26 testes a passar**.
+
+### A minha opinião no momento
+
+- Esta era a limitação mais importante das últimas três entregas — resolvida antes de avançar para mais funcionalidade, como devia ser (uma loadsheet real com este erro seria um problema de segurança, não só de precisão).
+- `calculate_lizfw` (nível de porão) não foi removido, só deixou de ser o caminho usado pelo `LoadService`. Mantém-se útil para cenários em que só se conhece o peso total de um porão, sem saber a posição exata (ex.: planeamento preliminar antes de decidir onde cada ULD vai fisicamente).
+
 ## Próximos passos possíveis (não decididos)
 
-- [ ] Resolver a aproximação do `LoadService`: usar o `balance_arm` exato de cada posição de ULD no LIZFW, não a média do porão
 - [ ] Mapear o Main Deck / Bulk (CPT5) e confirmar se as baias 13/25/26/34/43 (sem posição P) aceitam algum ULD alternativo
 - [ ] Parsing real de secções do AHM 565 (C: index/MAC/CG limits; D: holds/cabin; E: DOW/DOI por registration) em vez de dados hardcoded
 - [ ] Endpoint de ingestão (`POST /api/v1/aircraft/ahm565`) para validar `AircraftProfile`/`AircraftEnvelope` via API antes de gravar no Supabase

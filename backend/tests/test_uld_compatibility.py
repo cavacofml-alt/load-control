@@ -62,4 +62,25 @@ def test_load_service_computes_lizfw_when_valid(envelope, cargo_holds):
     service = LoadService(BalanceCalculator(envelope))
     hold_loads = {"11P": {"uld_type": "PMC", "weight": 4800.0}}
     lizfw = service.calculate_validated_lizfw(hold_loads, cargo_holds)
-    assert lizfw != envelope.doi
+
+    # Recalcula de forma independente usando o balance_arm exato de 11P
+    # (15.885), não a média do porão CPT1 (17.125) — confirma a precisão.
+    positions = _all_positions(cargo_holds)
+    position_11p = next(p for p in positions if p.position_code == "11P")
+    expected_delta = 4800.0 * ((position_11p.balance_arm - envelope.reference_station) / envelope.c_constant)
+    assert lizfw == round(envelope.doi + expected_delta, 5)
+
+
+def test_load_service_uses_position_arm_not_hold_average(envelope, cargo_holds):
+    # A mesma carga calculada com o centroide médio do porão (CPT1=17.125)
+    # em vez do balance_arm exato de 11P (15.885) dava um LIZFW diferente —
+    # confirma que a precisão por posição está mesmo a ser usada.
+    service = LoadService(BalanceCalculator(envelope))
+    hold_loads = {"11P": {"uld_type": "PMC", "weight": 4800.0}}
+    lizfw = service.calculate_validated_lizfw(hold_loads, cargo_holds)
+
+    cpt1 = next(h for h in cargo_holds if h.hold_code == "CPT1")
+    hold_level_delta = 4800.0 * ((cpt1.balance_arm - envelope.reference_station) / envelope.c_constant)
+    hold_level_lizfw = round(envelope.doi + hold_level_delta, 5)
+
+    assert lizfw != hold_level_lizfw

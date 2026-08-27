@@ -138,6 +138,37 @@ class BalanceCalculator:
 
         return round(self.aircraft.doi + index_delta, 5)
 
+    def calculate_lizfw_from_positions(
+        self,
+        position_loads: dict[str, float],
+        cargo_holds: list[CargoHold],
+        pax_loads: dict[str, dict[str, int] | float] | None = None,
+        cabin_zones: list[CabinZone] | None = None,
+    ) -> float:
+        """Como `calculate_lizfw`, mas usa o balance_arm exato de cada posição
+        de ULD carregada, não a média/centroide agregado do porão (CargoHold).
+
+        Mais preciso sempre que se conhece a posição exata onde cada ULD está
+        (ex.: 24P tem arm=28.203, bem diferente do centroide médio de CPT2,
+        24.575 — usar a média introduziria um erro real no índice).
+        `position_loads` mapeia position_code -> peso (kg) carregado nessa posição.
+        """
+        positions_by_code = {
+            position.position_code: position
+            for hold in cargo_holds
+            for position in hold.uld_positions
+        }
+        index_delta = 0.0
+        for position_code, weight in position_loads.items():
+            position = positions_by_code[position_code]
+            index_per_weight_unit = (position.balance_arm - self.aircraft.reference_station) / self.aircraft.c_constant
+            index_delta += weight * index_per_weight_unit
+
+        if pax_loads:
+            index_delta += self.calculate_pax_influence(pax_loads, cabin_zones or [])
+
+        return round(self.aircraft.doi + index_delta, 5)
+
     def check_weight_limits(self, zfw: float, tow: float, law: float) -> dict:
         """Valida os pesos contra os limites estruturais da aeronave."""
         return {
