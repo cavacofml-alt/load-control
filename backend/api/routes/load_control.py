@@ -1,9 +1,13 @@
+import logging
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from core.calculator import BalanceCalculator
 from core.load_service import LoadService
 from repositories.aircraft_repository import get_aircraft_profile
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/load-control", tags=["load-control"])
 
@@ -34,7 +38,14 @@ def calculate(payload: CalculateRequest) -> CalculateResponse:
     Corre `LoadService` (overlap + compatibilidade de ULD) antes de calcular;
     qualquer violação estrutural devolve 422 em vez de um resultado inválido.
     """
-    profile = get_aircraft_profile(payload.registration)
+    try:
+        profile = get_aircraft_profile(payload.registration)
+    except Exception:
+        # Erro de infraestrutura (env vars em falta, Supabase indisponível, etc.)
+        # — nunca deixar escapar um stack trace/erro cru para o cliente.
+        logger.exception("Falha ao ir buscar o perfil da aeronave '%s' ao Supabase", payload.registration)
+        raise HTTPException(status_code=503, detail="Serviço de dados de aeronaves indisponível.")
+
     if profile is None:
         raise HTTPException(status_code=404, detail=f"Aeronave '{payload.registration}' não encontrada.")
 

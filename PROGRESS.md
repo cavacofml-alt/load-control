@@ -173,7 +173,25 @@ Registo do que foi feito, decisão a decisão. Atualizado a cada trabalho releva
 - `check_weight_limits` continua a usar o mesmo `zfw` para `zfw`/`tow`/`law` — essa simplificação (já registada antes) mantém-se, não resolvida aqui.
 - `POST /api/v1/aircraft/profile` continua só a validar, sem gravar — ficou fora do pedido desta vez (só o `/calculate` tinha de deixar de ser hardcoded).
 
+## 2026-08-27 (cont.) — Frontend inicial, CORS, e primeiro E2E real no browser
+
+- **Backend — CORS**: `CORSMiddleware` em `main.py`, com `allow_origins` explícito para `localhost:3000`/`load-control.vercel.app` e `allow_origin_regex=r"https://.*\.vercel\.app"` para cobrir qualquer preview deployment. **Correção face ao pedido**: `allow_origins=["https://*.vercel.app"]` não funciona — o middleware não aceita wildcards nesse parâmetro, só em `allow_origin_regex`.
+- **Frontend — `lib/api.ts`**: cliente tipado (`CalculateRequest`/`CalculateResponse`/`ApiError`) para `POST /api/v1/load-control/calculate`, usando `NEXT_PUBLIC_API_URL`. `.env.local.example` criado.
+- **Frontend — `app/page.tsx`**: dashboard substitui o template do `create-next-app` — matrícula, dropdowns de posição/tipo de ULD, peso, botão "Calculate Load", cartão de resultado (ZFW/LIZFW/%MACZFW/dentro dos limites), alerta vermelho com o `detail` real da API em erro.
+- **Dois bugs reais encontrados e corrigidos ao verificar o circuito end-to-end a sério** (não só com testes automáticos):
+  1. `get_aircraft_profile` deixava escapar `KeyError` (env vars do Supabase em falta) sem tratamento — o endpoint devolvia um 503 cru com stack trace. Corrigido: `try/except Exception` à volta da chamada ao repositório, log do erro real no servidor, 503 limpo (`"Serviço de dados de aeronaves indisponível."`) para o cliente.
+  2. O servidor de teste tinha sido arrancado sem as env vars do Supabase persistidas de forma fiável (dependia de `export` inline antes de um processo backgrounded). Criado `backend/.env` real (gitignored) em vez de depender disso — mais robusto e é o que qualquer deployment real (Railway) também vai precisar.
+- **Verificação E2E real, no browser** (Chrome via automação, não simulação): com backend (porta 8000) e frontend (`npm run dev`, porta 3000) a correr, e Supabase real por trás — carregar 4800kg de PMC em 11P devolveu `ZFW=129.987kg / LIZFW=49.9072 / %MACZFW=11.75% / dentro dos limites: Sim`, **os mesmos valores exatos** do `curl` anterior. De seguida, carregar **6000kg** na mesma posição (excede o limite de 5103kg do PMC) foi corretamente rejeitado com HTTP 422, mostrado no alerta vermelho: *"Peso 6000.0kg excede o limite estrutural de 5103.0kg para 'PMC' na posição '11P'."*
+
+### A minha opinião no momento
+
+- **Railway continua por fazer.** O backend não está deployed em lado nenhum — só correu localmente para este teste. "Fazer push para o Railway atualizar" não se aplica ainda; isso é passo à parte (criar o projeto Railway, ligar o repo) que ainda não demos.
+- Os dois bugs encontrados nesta verificação (KeyError não tratado, env vars não fiáveis) só apareceram porque testei a sério em vez de confiar só nos testes automáticos com mock — reforça que a verificação manual end-to-end vale a pena antes de dar uma funcionalidade como fechada, mesmo com testes verdes.
+- Achado à parte, de ferramenta: os cliques por coordenadas no browser falhavam silenciosamente neste ambiente (sem erro, sem pedido de rede); cliques por referência de elemento (`ref`) funcionaram sempre. Não é um bug do código, é uma particularidade da automação de browser usada para verificar.
+- `POST /api/v1/aircraft/profile` continua só a validar (não grava) — fora do âmbito desta entrega.
+
 ## Próximos passos possíveis (não decididos)
+- [ ] Deploy real do backend no Railway (ainda não existe) — sem isto, um frontend na Vercel em produção não tem para onde apontar
 - [ ] Ligar `POST /api/v1/aircraft/profile` à gravação no Supabase (reutilizando a lógica de `scripts/seed_tcjnh.py`)
 - [ ] Teste de integração automatizado (não só mock) contra uma DB de teste/staging, para cobrir em CI o que hoje só foi verificado manualmente
 - [ ] Parsing real de secções do AHM 565 (C: index/MAC/CG limits; D: holds/cabin; E: DOW/DOI por registration) em vez de dados hardcoded
