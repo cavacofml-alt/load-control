@@ -8,6 +8,15 @@ LATERAL_ALLOWED_ULDS = {"AKE": 1587.0, "PKC": 1587.0}
 CENTRAL_ALLOWED_ULDS = {"PLA": 3174.0}
 PALLET_ALLOWED_ULDS = {"PAG": 4626.0, "PMC": 5103.0}
 
+# Posições do porão BULK (Sheet D2, Bulk Holds): carga solta (bagagem/sacos),
+# não ULDs contentorizados — por isso usam um tipo sintético "BULK" em vez de
+# AKE/PKC/PLA/PAG/PMC. Não há sobreposição entre elas (compartimentos separados).
+BULK_POSITIONS = [
+    ("CPT51", 339.0, 52.755),
+    ("CPT52", 1413.0, 53.285),
+    ("CPT53", 1716.0, 55.330),
+]
+
 # (bay_number, centroid L/R/central, centroid P ou None se a baia não tiver
 # posição de palete grande, hold_code do porão a que a baia pertence)
 FORWARD_HOLD_BAYS = [
@@ -103,12 +112,17 @@ class AHM565Parser:
         for bay_number, centroid_lr, centroid_p, hold_code in FORWARD_HOLD_BAYS + AFT_HOLD_BAYS:
             positions_by_hold[hold_code].extend(_build_bay_positions(bay_number, centroid_lr, centroid_p))
 
+        cpt5_positions = [
+            UldPosition(position_code=code, balance_arm=arm, allowed_ulds={"BULK": max_weight})
+            for code, max_weight, arm in BULK_POSITIONS
+        ]
+
         return [
             CargoHold(hold_code="CPT1", hold_type="LOWER", max_weight=10206.0, balance_arm=17.125, uld_positions=positions_by_hold["CPT1"]),
             CargoHold(hold_code="CPT2", hold_type="LOWER", max_weight=20412.0, balance_arm=24.575, uld_positions=positions_by_hold["CPT2"]),
             CargoHold(hold_code="CPT3", hold_type="LOWER", max_weight=9522.0, balance_arm=44.650, uld_positions=positions_by_hold["CPT3"]),
             CargoHold(hold_code="CPT4", hold_type="LOWER", max_weight=10206.0, balance_arm=49.600, uld_positions=positions_by_hold["CPT4"]),
-            CargoHold(hold_code="CPT5", hold_type="LOWER", max_weight=3468.0, balance_arm=54.267),
+            CargoHold(hold_code="CPT5", hold_type="LOWER", max_weight=3468.0, balance_arm=54.267, uld_positions=cpt5_positions),
         ]
 
     def parse_cabin_zones(self) -> list[CabinZone]:

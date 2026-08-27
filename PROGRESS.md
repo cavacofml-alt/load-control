@@ -132,9 +132,18 @@ Registo do que foi feito, decisão a decisão. Atualizado a cada trabalho releva
 - Esta era a limitação mais importante das últimas três entregas — resolvida antes de avançar para mais funcionalidade, como devia ser (uma loadsheet real com este erro seria um problema de segurança, não só de precisão).
 - `calculate_lizfw` (nível de porão) não foi removido, só deixou de ser o caminho usado pelo `LoadService`. Mantém-se útil para cenários em que só se conhece o peso total de um porão, sem saber a posição exata (ex.: planeamento preliminar antes de decidir onde cada ULD vai fisicamente).
 
-## Próximos passos possíveis (não decididos)
+## 2026-08-27 (cont.) — CPT5/Bulk: última peça do Lower Deck
 
-- [ ] Mapear o Main Deck / Bulk (CPT5) e confirmar se as baias 13/25/26/34/43 (sem posição P) aceitam algum ULD alternativo
+- **`ahm565_parser.py`**: `CPT5` (Bulk hold) passa a ter as suas 3 posições reais (Sheet D2, Bulk Holds): `CPT51` (339kg, arm 52.755), `CPT52` (1413kg, arm 53.285), `CPT53` (1716kg, arm 55.330). Usam um tipo sintético `"BULK"` em `allowed_ulds` — bulk é carga solta, não ULD contentorizado, por isso não faz sentido usar AKE/PKC/PLA/PAG/PMC aqui.
+- **Testes** (`tests/test_uld_full_deck.py`, +4 casos): confirma que as 3 posições do Bulk não têm exclusão mútua entre si (são compartimentos separados, podem carregar-se todos ao mesmo tempo), que rejeitam qualquer tipo de ULD contentorizado, e que respeitam o limite de peso próprio (ex.: 400kg em CPT51 é rejeitado, limite real 339kg). Total do Lower Deck: **61 posições** (58 ULD + 3 Bulk). Suite completa: **30/30 testes a passar**.
+- O pedido original ("mapear baias 12,13,21-26,31-34,41-43") já estava feito nos dois commits anteriores (`7c7e051`, `6f2c0c4`) — o CPT5/Bulk era a única lacuna real.
+
+### A minha opinião no momento
+
+- `"BULK"` como chave de `allowed_ulds` é uma simplificação deliberada — não existe um "tipo de ULD" chamado BULK no manual, é só a forma mais simples de reutilizar o mesmo mecanismo de validação (`validate_uld_compatibility`) para um conceito diferente (carga solta com limite de peso, sem tipo de contentor). Se a distinção entre bulk e ULD vier a importar de forma mais rica (ex.: DG que só pode ir em bulk, ou vice-versa), vale a pena revisitar isto com um campo próprio em vez de um tipo sintético.
+- O Lower Deck do A330-300 está agora completo e testado ponta-a-ponta: overlap, compatibilidade de tipo/peso, e cálculo de índice por posição exata (incluindo bulk). A Fase 3 do roadmap está, na prática, fechada.
+
+## Próximos passos possíveis (não decididos)
 - [ ] Parsing real de secções do AHM 565 (C: index/MAC/CG limits; D: holds/cabin; E: DOW/DOI por registration) em vez de dados hardcoded
 - [ ] Endpoint de ingestão (`POST /api/v1/aircraft/ahm565`) para validar `AircraftProfile`/`AircraftEnvelope` via API antes de gravar no Supabase
 - [ ] Estrutura real de mensagem telex para `ahm560_parser.py` (falta uma amostra real)
