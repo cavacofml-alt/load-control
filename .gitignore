@@ -9,3 +9,5 @@ frontend/.next/
 frontend/.env*.local
 
 .env
+
+.vercel

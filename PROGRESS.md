@@ -190,8 +190,35 @@ Registo do que foi feito, decisão a decisão. Atualizado a cada trabalho releva
 - Achado à parte, de ferramenta: os cliques por coordenadas no browser falhavam silenciosamente neste ambiente (sem erro, sem pedido de rede); cliques por referência de elemento (`ref`) funcionaram sempre. Não é um bug do código, é uma particularidade da automação de browser usada para verificar.
 - `POST /api/v1/aircraft/profile` continua só a validar (não grava) — fora do âmbito desta entrega.
 
+## 2026-08-27 (cont.) — Backend no Railway + circuito público fechado
+
+- **Deploy real do backend**: projeto `load-control` no Railway (renomeado de `load-control-backend`), ligado ao GitHub (`cavacofml-alt/load-control`, branch `main`, deploy automático a cada push), env vars do Supabase configuradas, domínio público `load-control-production.up.railway.app`.
+- **Bug real encontrado e corrigido**: o primeiro build via GitHub falhou — o Railpack tentou compilar a partir da **raiz do repo** (que não tem `requirements.txt`), não de `backend/`, porque `rootDirectory` não estava definido no serviço. O deploy manual anterior (`railway up` a partir de `backend/`) tinha mascarado isto, continuando "RUNNING" com a imagem antiga enquanto o pipeline do GitHub falhava silenciosamente ao lado. Corrigido com `serviceInstanceUpdate(rootDirectory: "backend")` via API do Railway, seguido de `railway redeploy` — confirmado a funcionar com os mesmos valores exatos (`LIZFW=49.9072`) do teste anterior.
+- **`backend/Procfile`** criado (`web: uvicorn main:app --host 0.0.0.0 --port $PORT`).
+- **Frontend ligado ao backend real**: `NEXT_PUBLIC_API_URL` definida no Vercel (produção + preview) a apontar para o Railway. Havia uma variável antiga (de antes do backend existir) que foi substituída.
+- **Deploy de produção na Vercel** feito a partir da raiz do repo (não de `frontend/`) — fazer `vercel --prod` de dentro de `frontend/` falha com "Root Directory does not exist" quando o projeto já tem Root Directory configurado no dashboard; o CLI precisa de ver a árvore completa do repo para aplicar essa definição.
+- **Login de duas contas feito via device-code flow** (Railway e Vercel) — a conta é do utilizador, por isso o login teve de ser confirmado por ele no browser, não por mim.
+
+### A minha opinião no momento
+
+- O bug do `rootDirectory` só foi apanhado porque o utilizador partilhou o ecrã real do dashboard do Railway a meio do trabalho — sem isso, eu teria assumido (incorretamente) que o deploy automático estava a funcionar, só porque `/health` respondia bem (respondia, mas com a imagem antiga, não com o código novo). Vale a pena lembrar: um endpoint a responder não prova que o deploy mais recente funcionou.
+- Os dois primeiros códigos de login do Railway expiraram sem confirmação (janela curta, provavelmente 3-5 min) — o processo tem de ser mais rápido da próxima vez: gerar o código e pedir confirmação imediata, não deixar o código "à espera" enquanto se faz outra coisa.
+
+## 2026-08-27 (cont.) — Dashboard "next-gen" (UI scaffold, dados mock)
+
+- **`app/page.tsx` reescrito de raiz**: layout fullscreen (`h-screen`, sem scroll global — só as colunas individuais fazem scroll interno), top bar (voo, matrícula, STD/ETD, badge FLIGHT SECURE/OUT OF LIMITS), 3 colunas (Distribuição de Passageiros + Carga/ULDs | Weight Cascade DOW→ZFW→TOW→LDW com gauges lineares coloridos por proximidade do limite | CG Envelope com `recharts`, polígono + 3 pontos ZFW/TOW/LDW).
+- **`recharts` instalado** sem conflitos de peer deps com React/Next.js 16.
+- **Dados mock estáticos**, como pedido — DOW 115000kg, DOI 52.00, MZFW 175000kg, etc. Isto está **desligado da API real** de propósito (é um exercício de UI, não voltou a chamar `/calculate`); `lib/api.ts` continua intacto para quando se ligar isto a sério.
+- Verificado visualmente no browser: badge verde, gauges verde/verde/âmbar (LDW a 96.1% do limite), os 3 pontos do envelope visíveis e bem posicionados dentro do polígono.
+
+### A minha opinião no momento
+
+- O envelope de CG usado é **ilustrativo**, não os limites certificados reais do A330-300 — a forma (hexágono) dá a sensação certa mas os números não vêm de lado nenhum. Isto é adequado para um scaffold visual, mas fica sinalizado para não ser confundido com dados reais mais tarde.
+- Os inputs (passageiros, carga) são interativos no sentido em que aceitam edição, mas **não recalculam nada** — o cascade e o envelope continuam estáticos. Mantive isto deliberadamente fiel ao pedido ("Mock Data... valores estáticos"), mas é o próximo passo óbvio se quiserem que o dashboard passe de maquete a ferramenta real: ligar estes inputs ao `lib/api.ts` já existente.
+
 ## Próximos passos possíveis (não decididos)
-- [ ] Deploy real do backend no Railway (ainda não existe) — sem isto, um frontend na Vercel em produção não tem para onde apontar
+- [ ] Ligar o dashboard novo (inputs de passageiros/carga) ao `/calculate` real via `lib/api.ts`, substituindo o cascade/envelope estáticos por valores calculados
+- [ ] Substituir o envelope de CG ilustrativo pelos limites reais certificados (Secção C, Sheet 5 do AHM565)
 - [ ] Ligar `POST /api/v1/aircraft/profile` à gravação no Supabase (reutilizando a lógica de `scripts/seed_tcjnh.py`)
 - [ ] Teste de integração automatizado (não só mock) contra uma DB de teste/staging, para cobrir em CI o que hoje só foi verificado manualmente
 - [ ] Parsing real de secções do AHM 565 (C: index/MAC/CG limits; D: holds/cabin; E: DOW/DOI por registration) em vez de dados hardcoded
