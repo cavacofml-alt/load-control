@@ -21,6 +21,8 @@ def validate_hold_overlap(hold_loads: dict[str, float], uld_positions: list[UldP
     occupied = {code for code, weight in hold_loads.items() if weight > 0}
 
     for code in occupied:
+        if code not in positions_by_code:
+            raise ValueError(f"Posição de ULD desconhecida: '{code}'.")
         position = positions_by_code[code]
         conflicts = set(position.mutually_exclusive_with) & occupied
         if conflicts:
@@ -40,6 +42,8 @@ def validate_uld_compatibility(hold_loads: dict[str, dict], uld_positions: list[
     positions_by_code = {position.position_code: position for position in uld_positions}
 
     for code, load in hold_loads.items():
+        if code not in positions_by_code:
+            raise ValueError(f"Posição de ULD desconhecida: '{code}'.")
         position = positions_by_code[code]
         uld_type = load["uld_type"]
         weight = load["weight"]

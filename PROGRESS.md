@@ -143,9 +143,27 @@ Registo do que foi feito, decisão a decisão. Atualizado a cada trabalho releva
 - `"BULK"` como chave de `allowed_ulds` é uma simplificação deliberada — não existe um "tipo de ULD" chamado BULK no manual, é só a forma mais simples de reutilizar o mesmo mecanismo de validação (`validate_uld_compatibility`) para um conceito diferente (carga solta com limite de peso, sem tipo de contentor). Se a distinção entre bulk e ULD vier a importar de forma mais rica (ex.: DG que só pode ir em bulk, ou vice-versa), vale a pena revisitar isto com um campo próprio em vez de um tipo sintético.
 - O Lower Deck do A330-300 está agora completo e testado ponta-a-ponta: overlap, compatibilidade de tipo/peso, e cálculo de índice por posição exata (incluindo bulk). A Fase 3 do roadmap está, na prática, fechada.
 
+## 2026-08-27 (cont.) — Supabase ligado (schema + seed) e API FastAPI
+
+- **Correção de schema Supabase**: `aircraft.reference_station` estava em falta desde sempre (existia no Pydantic, nunca migrado); adicionada via `ALTER TABLE`. Nova tabela `uld_positions` (posição, `balance_arm`, `allowed_ulds` JSONB, `mutually_exclusive_with` TEXT[]), com RLS por `airline_id` via join a `cargo_holds`/`aircraft`.
+- **Bug de infraestrutura mais antigo, encontrado e corrigido**: a `service_role` (e `anon`/`authenticated`) nunca tiveram `GRANT` nas tabelas — só RLS policies. Isto existia desde a primeira migração e nunca tinha sido detetado porque só se testava introspecção de schema, nunca uma leitura real de dados. Corrigido com `GRANT`s explícitos + `ALTER DEFAULT PRIVILEGES` para tabelas futuras herdarem automaticamente.
+- **`scripts/seed_tcjnh.py`**: semeia o TC-JNH real no Supabase (airline, aircraft, 3 cabin_zones, 5 cargo_holds, **61 uld_positions**) usando o `AHM565Parser` como única fonte — nada transcrito manualmente para SQL. Requereu adicionar `truststore` (interceção TLS local impedia o `certifi` do Python de validar o certificado, apesar do `curl` funcionar sem problemas).
+- **API FastAPI** (`api/routes/aircraft.py`, `api/routes/load_control.py`, ligados no `main.py`):
+  - `POST /api/v1/aircraft/profile` — valida um payload contra `AircraftProfile`/`AircraftEnvelope`; só valida, não grava (isso é o `scripts/seed_tcjnh.py`, já existente).
+  - `POST /api/v1/load-control/calculate` — recebe `pax_loads` + `hold_loads` (com `uld_type`), corre o `LoadService` (overlap + compatibilidade) e devolve `zfw`/`lizfw`/`mac_zfw`; devolve HTTP 422 com o motivo se alguma validação falhar. Usa o TC-JNH mockado do parser por agora, não lê do Supabase ainda.
+- **Bug apanhado antes de correr os testes**: `validate_hold_overlap`/`validate_uld_compatibility` faziam `positions_by_code[code]` sem verificar existência — uma posição desconhecida (ex.: `"99Z"`) rebentava com `KeyError` não tratado (HTTP 500), não o 422 esperado. Corrigido para lançar `ValueError` explícito.
+- **Testes** (`tests/test_api.py`, 8 casos, via `TestClient`): payload vazio devolve ZFW=DOW; carga+passageiros válidos devolvem 200; ULD incompatível, overlap, e posição desconhecida devolvem 422; endpoint de perfil aceita payload válido e rejeita incompleto. Suite completa: **38/38 testes a passar**, todos à primeira depois da correção do KeyError.
+
+### A minha opinião no momento
+
+- O bug de `GRANT` em falta era mais grave do que qualquer coisa que já tínhamos registado como limitação — sem ele, **nenhuma** leitura/escrita real via REST teria funcionado, nem com a `service_role`. Só não apareceu antes porque nunca se tinha testado uma query real contra dados, só introspecção de schema.
+- `/calculate` ainda não lê do Supabase — usa sempre o TC-JNH mockado, exatamente como pedido ("por agora"). Isto significa que o endpoint e o seed já feito ainda não estão ligados um ao outro; é o próximo passo óbvio se quisermos o endpoint a servir dados reais em vez do mock.
+- Não liguei `check_weight_limits` (tow/law) a nada real no `/calculate` — uso o mesmo `zfw` para os três parâmetros (`zfw`, `tow`, `law`) porque não há ainda conceito de combustível/trip fuel no payload. É uma simplificação válida só para ZFW, não para um cálculo de TOW/LAW real.
+
 ## Próximos passos possíveis (não decididos)
+- [ ] Ligar `/api/v1/load-control/calculate` a dados reais do Supabase (por registration), em vez do TC-JNH sempre mockado
+- [ ] Ligar `POST /api/v1/aircraft/profile` à gravação no Supabase (reutilizando a lógica de `scripts/seed_tcjnh.py`)
 - [ ] Parsing real de secções do AHM 565 (C: index/MAC/CG limits; D: holds/cabin; E: DOW/DOI por registration) em vez de dados hardcoded
-- [ ] Endpoint de ingestão (`POST /api/v1/aircraft/ahm565`) para validar `AircraftProfile`/`AircraftEnvelope` via API antes de gravar no Supabase
 - [ ] Estrutura real de mensagem telex para `ahm560_parser.py` (falta uma amostra real)
 - [ ] Decidir se `BalanceCalculator` passa a trabalhar sobre `AircraftProfile` (envelope + holds + zonas) em vez de parâmetros soltos
 - [ ] Validação de `max_weight`/`max_capacity` ao aplicar deadload/passageiros (`calculate_lizfw` ainda não rejeita sobrecarga de um CPT ou zona)
