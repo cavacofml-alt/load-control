@@ -216,8 +216,21 @@ Registo do que foi feito, decisão a decisão. Atualizado a cada trabalho releva
 - O envelope de CG usado é **ilustrativo**, não os limites certificados reais do A330-300 — a forma (hexágono) dá a sensação certa mas os números não vêm de lado nenhum. Isto é adequado para um scaffold visual, mas fica sinalizado para não ser confundido com dados reais mais tarde.
 - Os inputs (passageiros, carga) são interativos no sentido em que aceitam edição, mas **não recalculam nada** — o cascade e o envelope continuam estáticos. Mantive isto deliberadamente fiel ao pedido ("Mock Data... valores estáticos"), mas é o próximo passo óbvio se quiserem que o dashboard passe de maquete a ferramenta real: ligar estes inputs ao `lib/api.ts` já existente.
 
+## 2026-08-27 (cont.) — Dashboard ligado ao /calculate real
+
+- **`app/page.tsx`**: passageiros e carga passam a alimentar `useState`, com um `useEffect` debounced (500ms) que chama `calculateLoad()` (`lib/api.ts`) a cada alteração — sem botão, auto-calculate mesmo, como pedido. Um `requestIdRef` evita que uma resposta lenta e antiga sobreponha um cálculo mais recente quando o utilizador edita vários campos seguidos.
+- **Weight Cascade**: o gauge de **ZFW é real** (`result.zfw`, limite `AIRCRAFT.mzfw`). **TOW/LDW continuam estimativa** — o backend não calcula estes hoje (sem conceito de combustível no sistema) — e ficam marcados com um badge visual "estimativa" para não passar por dados reais.
+- **CG Envelope**: o ponto de **ZFW move-se em tempo real** (`mac: result.mac_zfw`, `weight: result.zfw`), desaparece se não houver resultado válido. Os pontos de TOW/LDW mantêm-se estáticos/cinzentos (mock), visualmente distintos do ZFW (azul).
+- **Erros**: um `ApiError` (404/422) do backend real é capturado e mostrado num banner vermelho com a mensagem exata da API; o badge principal muda para `OUT OF LIMITS`.
+- **Verificado no browser contra o Railway real** (não mock): alterar passageiros/carga recalcula ZFW corretamente (ex.: 152.015kg/86.9%, LIZFW 69.0585, %MACZFW 18.01%); pôr 6000kg de PMC em 11P (excede o limite de 5103kg) dispara o erro real, o banner mostra a mensagem exata do backend, e o badge muda para vermelho.
+
+### A minha opinião no momento
+
+- Recusei fingir que TOW/LDW vêm "exatos da API" (como o pedido original assumia) porque simplesmente não existem no backend — antes preferi marcar isso claramente na UI do que inventar dados. É uma lacuna real do sistema (falta conceito de combustível), não só um detalhe de UI por fazer.
+- O debounce de 500ms é uma escolha arbitrária — bom compromisso entre sentir "ao vivo" e não disparar um pedido por cada tecla, mas não testei com latência de rede alta (Railway pode ter cold start).
+
 ## Próximos passos possíveis (não decididos)
-- [ ] Ligar o dashboard novo (inputs de passageiros/carga) ao `/calculate` real via `lib/api.ts`, substituindo o cascade/envelope estáticos por valores calculados
+- [ ] Adicionar conceito de combustível (fuel on board, trip fuel) ao backend para calcular TOW/LDW reais, e ligar isso ao dashboard
 - [ ] Substituir o envelope de CG ilustrativo pelos limites reais certificados (Secção C, Sheet 5 do AHM565)
 - [ ] Ligar `POST /api/v1/aircraft/profile` à gravação no Supabase (reutilizando a lógica de `scripts/seed_tcjnh.py`)
 - [ ] Teste de integração automatizado (não só mock) contra uma DB de teste/staging, para cobrir em CI o que hoje só foi verificado manualmente

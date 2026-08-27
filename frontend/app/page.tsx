@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CartesianGrid,
   ComposedChart,
@@ -11,10 +11,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { ApiError, calculateLoad, type CalculateResponse } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
-// Mock data — valores estáticos realistas para o scaffold visual (Fase de UI).
-// Não vem da API ainda; ver lib/api.ts para a integração real do /calculate.
+// Dados estáticos da aeronave (limites estruturais reais do TC-JNH) e valores
+// mock para o que a API ainda não calcula (TOW/LDW — não há conceito de
+// combustível no sistema hoje, só ZFW). Passageiros e carga vêm do estado,
+// ligados ao POST /calculate real via lib/api.ts.
 // ---------------------------------------------------------------------------
 
 const FLIGHT = {
@@ -25,20 +28,19 @@ const FLIGHT = {
 };
 
 const AIRCRAFT = {
-  dow: 115000,
-  doi: 52.0,
+  dow: 125187,
+  doi: 89.2,
   mzfw: 175000,
   mtow: 233000,
   mlaw: 187000,
 };
 
-const WEIGHTS = [
-  { key: "zfw", label: "ZFW", actual: 158200, limit: AIRCRAFT.mzfw },
-  { key: "tow", label: "TOW", actual: 210400, limit: AIRCRAFT.mtow },
-  { key: "ldw", label: "LDW", actual: 179800, limit: AIRCRAFT.mlaw },
-];
-
-const ALL_WITHIN_LIMITS = WEIGHTS.every((w) => w.actual <= w.limit);
+// TOW/LDW não são calculados pelo backend (sem input de combustível ainda) —
+// mantidos como estimativa fixa, marcados como tal na UI.
+const TOW_LDW_ESTIMATE = {
+  tow: { actual: 210400, limit: AIRCRAFT.mtow },
+  ldw: { actual: 179800, limit: AIRCRAFT.mlaw },
+};
 
 const INITIAL_CABIN_ZONES = [
   { code: "0A", label: "Zona 0A · FWD", capacity: 28, pax: 24 },
@@ -55,8 +57,8 @@ const INITIAL_CARGO_ROWS = [
 
 const ULD_TYPES = ["AKE", "PKC", "PLA", "PAG", "PMC", "BULK"];
 
-// Envelope de CG (polígono fechado) e os 3 pontos de ZFW/TOW/LDW — forma
-// ilustrativa, não os limites reais certificados do A330-300.
+// Envelope de CG (polígono fechado) — forma ilustrativa, não os limites
+// certificados reais do A330-300 (esses vivem na Secção C do AHM565).
 const ENVELOPE_POLYGON = [
   { mac: 18, weight: 110000 },
   { mac: 15, weight: 175000 },
@@ -67,18 +69,21 @@ const ENVELOPE_POLYGON = [
   { mac: 18, weight: 110000 },
 ];
 
-const CG_POINTS = [
-  { mac: 24.1, weight: WEIGHTS[0].actual, label: "ZFW" },
-  { mac: 27.4, weight: WEIGHTS[1].actual, label: "TOW" },
-  { mac: 25.8, weight: WEIGHTS[2].actual, label: "LDW" },
+// Pontos de TOW/LDW mock (o backend ainda não devolve index/%MAC para estes,
+// já que não calcula TOW/LDW) — só o ponto de ZFW é real/dinâmico.
+const TOW_LDW_POINTS = [
+  { mac: 27.4, weight: TOW_LDW_ESTIMATE.tow.actual, label: "TOW" },
+  { mac: 25.8, weight: TOW_LDW_ESTIMATE.ldw.actual, label: "LDW" },
 ];
+
+const DEBOUNCE_MS = 500;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function formatKg(value: number) {
-  return `${value.toLocaleString("en-US")} kg`;
+  return `${Math.round(value).toLocaleString("en-US")} kg`;
 }
 
 function gaugeColor(ratio: number) {
@@ -87,7 +92,17 @@ function gaugeColor(ratio: number) {
   return "bg-emerald-500";
 }
 
-function WeightGauge({ label, actual, limit }: { label: string; actual: number; limit: number }) {
+function WeightGauge({
+  label,
+  actual,
+  limit,
+  estimated = false,
+}: {
+  label: string;
+  actual: number;
+  limit: number;
+  estimated?: boolean;
+}) {
   const ratio = actual / limit;
   const pct = Math.min(ratio, 1) * 100;
   return (
@@ -95,6 +110,11 @@ function WeightGauge({ label, actual, limit }: { label: string; actual: number; 
       <div className="flex items-baseline justify-between">
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
           {label}
+          {estimated && (
+            <span className="ml-1.5 rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-medium normal-case tracking-normal text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+              estimativa
+            </span>
+          )}
         </span>
         <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
           {formatKg(actual)} <span className="text-slate-400 dark:text-slate-500">/ {formatKg(limit)}</span>
@@ -132,6 +152,14 @@ export default function Home() {
   const [cabinZones, setCabinZones] = useState(INITIAL_CABIN_ZONES);
   const [cargoRows, setCargoRows] = useState(INITIAL_CARGO_ROWS);
 
+  const [result, setResult] = useState<CalculateResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  // Evita que uma resposta antiga (pedido lento) sobreponha um cálculo mais
+  // recente quando o utilizador edita rapidamente vários campos seguidos.
+  const requestIdRef = useRef(0);
+
   function updatePax(code: string, pax: number) {
     setCabinZones((zones) => zones.map((z) => (z.code === code ? { ...z, pax } : z)));
   }
@@ -139,6 +167,54 @@ export default function Home() {
   function updateCargoRow(index: number, field: "position" | "uldType" | "weight", value: string | number) {
     setCargoRows((rows) => rows.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
   }
+
+  useEffect(() => {
+    const currentRequestId = ++requestIdRef.current;
+
+    const timer = setTimeout(async () => {
+      setLoading(true);
+
+      const pax_loads = Object.fromEntries(
+        cabinZones.map((zone) => [zone.code, { ADULT: zone.pax }])
+      );
+      const hold_loads = Object.fromEntries(
+        cargoRows
+          .filter((row) => row.position.trim() !== "")
+          .map((row) => [row.position, { uld_type: row.uldType, weight: row.weight }])
+      );
+
+      try {
+        const response = await calculateLoad({
+          registration: FLIGHT.registration,
+          pax_loads,
+          hold_loads,
+        });
+        if (requestIdRef.current === currentRequestId) {
+          setResult(response);
+          setError(null);
+        }
+      } catch (err) {
+        if (requestIdRef.current === currentRequestId) {
+          setResult(null);
+          setError(err instanceof ApiError ? `(${err.status}) ${err.message}` : "Falha ao contactar a API.");
+        }
+      } finally {
+        if (requestIdRef.current === currentRequestId) {
+          setLoading(false);
+        }
+      }
+    }, DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [cabinZones, cargoRows]);
+
+  const isSecure = result !== null && result.zfw_within_limits && error === null;
+  const badgeLabel = loading && result === null ? "A CALCULAR…" : isSecure ? "FLIGHT SECURE" : "OUT OF LIMITS";
+  const badgeIsNeutral = loading && result === null;
+
+  const zfwPoint = result
+    ? { mac: result.mac_zfw, weight: result.zfw, label: "ZFW" }
+    : null;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-slate-50 font-sans text-slate-900 dark:bg-slate-950 dark:text-slate-100">
@@ -171,12 +247,14 @@ export default function Home() {
 
         <span
           className={`rounded-full px-4 py-1.5 text-xs font-extrabold tracking-widest ${
-            ALL_WITHIN_LIMITS
-              ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-              : "bg-red-500/15 text-red-600 dark:text-red-400"
+            badgeIsNeutral
+              ? "bg-slate-500/15 text-slate-500 dark:text-slate-400"
+              : isSecure
+                ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                : "bg-red-500/15 text-red-600 dark:text-red-400"
           }`}
         >
-          {ALL_WITHIN_LIMITS ? "FLIGHT SECURE" : "OUT OF LIMITS"}
+          {badgeLabel}
         </span>
       </header>
 
@@ -184,6 +262,13 @@ export default function Home() {
       <main className="grid min-h-0 flex-1 grid-cols-12 gap-4 overflow-hidden p-4">
         {/* Esquerda: Data Entry & Breakdown */}
         <div className="col-span-4 flex min-h-0 flex-col gap-4 overflow-y-auto pr-1">
+          {error && (
+            <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+              <strong className="font-semibold">Erro de cálculo: </strong>
+              {error}
+            </div>
+          )}
+
           <SectionCard title="Distribuição de Passageiros">
             <div className="flex flex-col gap-3">
               {cabinZones.map((zone) => (
@@ -270,12 +355,35 @@ export default function Home() {
 
               <div className="flex justify-center text-slate-300 dark:text-slate-700">↓</div>
 
-              {WEIGHTS.map((w) => (
-                <div key={w.key} className="flex flex-col gap-2">
-                  <WeightGauge label={w.label} actual={w.actual} limit={w.limit} />
-                  {w.key !== "ldw" && <div className="flex justify-center text-slate-300 dark:text-slate-700">↓</div>}
+              <WeightGauge
+                label="ZFW"
+                actual={result?.zfw ?? AIRCRAFT.dow}
+                limit={AIRCRAFT.mzfw}
+              />
+
+              <div className="flex justify-center text-slate-300 dark:text-slate-700">↓</div>
+
+              <WeightGauge
+                label="TOW"
+                actual={TOW_LDW_ESTIMATE.tow.actual}
+                limit={TOW_LDW_ESTIMATE.tow.limit}
+                estimated
+              />
+
+              <div className="flex justify-center text-slate-300 dark:text-slate-700">↓</div>
+
+              <WeightGauge
+                label="LDW"
+                actual={TOW_LDW_ESTIMATE.ldw.actual}
+                limit={TOW_LDW_ESTIMATE.ldw.limit}
+                estimated
+              />
+
+              {result && (
+                <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+                  LIZFW {result.lizfw.toFixed(4)} · %MACZFW {result.mac_zfw.toFixed(2)}%
                 </div>
-              ))}
+              )}
             </div>
           </SectionCard>
         </div>
@@ -316,17 +424,22 @@ export default function Home() {
                     isAnimationActive={false}
                     name="Envelope"
                   />
-                  <Scatter data={CG_POINTS} dataKey="weight" fill="#2563eb" name="Pontos" />
+                  {/* TOW/LDW são mock (backend não os calcula ainda) */}
+                  <Scatter data={TOW_LDW_POINTS} dataKey="weight" fill="#94a3b8" name="TOW/LDW (estimativa)" />
+                  {/* ZFW é o único ponto real, vindo do /calculate */}
+                  {zfwPoint && <Scatter data={[zfwPoint]} dataKey="weight" fill="#2563eb" name="ZFW" />}
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
             <div className="flex justify-center gap-4 text-[11px] text-slate-500 dark:text-slate-400">
-              {CG_POINTS.map((p) => (
-                <span key={p.label} className="flex items-center gap-1">
-                  <span className="h-2 w-2 rounded-full bg-blue-600" />
-                  {p.label}
-                </span>
-              ))}
+              <span className="flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-blue-600" />
+                ZFW (real)
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-slate-400" />
+                TOW / LDW (estimativa)
+              </span>
             </div>
           </SectionCard>
         </div>
