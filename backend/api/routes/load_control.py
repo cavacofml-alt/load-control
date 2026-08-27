@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 from core.calculator import BalanceCalculator
 from core.load_service import LoadService
-from parsers.ahm565_parser import AHM565Parser
+from repositories.aircraft_repository import get_aircraft_profile
 
 router = APIRouter(prefix="/api/v1/load-control", tags=["load-control"])
 
@@ -14,6 +14,7 @@ class HoldLoadItem(BaseModel):
 
 
 class CalculateRequest(BaseModel):
+    registration: str
     pax_loads: dict[str, dict[str, int] | float] = Field(default_factory=dict)
     hold_loads: dict[str, HoldLoadItem] = Field(default_factory=dict)
 
@@ -25,21 +26,19 @@ class CalculateResponse(BaseModel):
     zfw_within_limits: bool
 
 
-def _load_tcjnh():
-    # TODO: aceitar um ID/registration no payload e ler do Supabase; por
-    # agora usa sempre o TC-JNH mockado no AHM565Parser.
-    parser = AHM565Parser("dummy")
-    return parser.parse(), parser.parse_cargo_holds(), parser.parse_cabin_zones()
-
-
 @router.post("/calculate", response_model=CalculateResponse)
 def calculate(payload: CalculateRequest) -> CalculateResponse:
-    """Calcula ZFW/LIZFW/%MACZFW a partir de carga nos porões e passageiros.
+    """Calcula ZFW/LIZFW/%MACZFW a partir de carga nos porões e passageiros,
+    para a aeronave identificada por `registration` (perfil lido do Supabase).
 
     Corre `LoadService` (overlap + compatibilidade de ULD) antes de calcular;
     qualquer violação estrutural devolve 422 em vez de um resultado inválido.
     """
-    envelope, cargo_holds, cabin_zones = _load_tcjnh()
+    profile = get_aircraft_profile(payload.registration)
+    if profile is None:
+        raise HTTPException(status_code=404, detail=f"Aeronave '{payload.registration}' não encontrada.")
+
+    envelope, cargo_holds, cabin_zones = profile.envelope, profile.cargo_holds, profile.cabin_zones
     calculator = BalanceCalculator(envelope)
     service = LoadService(calculator)
 

@@ -1,7 +1,33 @@
+import pytest
 from fastapi.testclient import TestClient
+
+import api.routes.load_control as load_control_module
+from core.models import AircraftProfile
 from main import app
+from parsers.ahm565_parser import AHM565Parser
 
 client = TestClient(app)
+
+
+def _tcjnh_profile() -> AircraftProfile:
+    parser = AHM565Parser("dummy")
+    return AircraftProfile(
+        envelope=parser.parse(),
+        cabin_zones=parser.parse_cabin_zones(),
+        cargo_holds=parser.parse_cargo_holds(),
+    )
+
+
+@pytest.fixture(autouse=True)
+def mock_aircraft_repository(monkeypatch):
+    """Isola os testes de API do Supabase real: devolve o perfil real do
+    TC-JNH para essa matrícula, e None para qualquer outra (simula 404)."""
+    profile = _tcjnh_profile()
+
+    def fake_get_aircraft_profile(registration: str):
+        return profile if registration == "TC-JNH" else None
+
+    monkeypatch.setattr(load_control_module, "get_aircraft_profile", fake_get_aircraft_profile)
 
 
 def test_health_check():
@@ -9,8 +35,13 @@ def test_health_check():
     assert response.status_code == 200
 
 
+def test_calculate_unknown_registration_returns_404():
+    response = client.post("/api/v1/load-control/calculate", json={"registration": "XX-YYY"})
+    assert response.status_code == 404
+
+
 def test_calculate_empty_payload_returns_dow_based_zfw():
-    response = client.post("/api/v1/load-control/calculate", json={})
+    response = client.post("/api/v1/load-control/calculate", json={"registration": "TC-JNH"})
     assert response.status_code == 200
     data = response.json()
     assert data["zfw"] == 125187.0  # DOW puro do TC-JNH, sem carga/pax
@@ -19,6 +50,7 @@ def test_calculate_empty_payload_returns_dow_based_zfw():
 
 def test_calculate_valid_cargo_and_pax_returns_200():
     payload = {
+        "registration": "TC-JNH",
         "pax_loads": {"0A": {"ADULT": 20}, "0B": {"ADULT": 100}, "0C": {"ADULT": 100}},
         "hold_loads": {"11P": {"uld_type": "PMC", "weight": 4800.0}},
     }
@@ -31,24 +63,25 @@ def test_calculate_valid_cargo_and_pax_returns_200():
 
 def test_calculate_incompatible_uld_returns_422():
     # PAG a 4800kg excede o limite real do próprio tipo (4626kg) em 11P
-    payload = {"hold_loads": {"11P": {"uld_type": "PAG", "weight": 4800.0}}}
+    payload = {"registration": "TC-JNH", "hold_loads": {"11P": {"uld_type": "PAG", "weight": 4800.0}}}
     response = client.post("/api/v1/load-control/calculate", json=payload)
     assert response.status_code == 422
 
 
 def test_calculate_overlap_returns_422():
     payload = {
+        "registration": "TC-JNH",
         "hold_loads": {
             "11L": {"uld_type": "AKE", "weight": 1200.0},
             "11": {"uld_type": "PLA", "weight": 3000.0},
-        }
+        },
     }
     response = client.post("/api/v1/load-control/calculate", json=payload)
     assert response.status_code == 422
 
 
 def test_calculate_unknown_position_returns_422():
-    payload = {"hold_loads": {"99Z": {"uld_type": "AKE", "weight": 1000.0}}}
+    payload = {"registration": "TC-JNH", "hold_loads": {"99Z": {"uld_type": "AKE", "weight": 1000.0}}}
     response = client.post("/api/v1/load-control/calculate", json=payload)
     assert response.status_code == 422
 

@@ -160,9 +160,22 @@ Registo do que foi feito, decisão a decisão. Atualizado a cada trabalho releva
 - `/calculate` ainda não lê do Supabase — usa sempre o TC-JNH mockado, exatamente como pedido ("por agora"). Isto significa que o endpoint e o seed já feito ainda não estão ligados um ao outro; é o próximo passo óbvio se quisermos o endpoint a servir dados reais em vez do mock.
 - Não liguei `check_weight_limits` (tow/law) a nada real no `/calculate` — uso o mesmo `zfw` para os três parâmetros (`zfw`, `tow`, `law`) porque não há ainda conceito de combustível/trip fuel no payload. É uma simplificação válida só para ZFW, não para um cálculo de TOW/LAW real.
 
+## 2026-08-27 (cont.) — Circuito fechado: /calculate a ler o Supabase real
+
+- **`repositories/aircraft_repository.py`** (novo): `get_aircraft_profile(registration)` vai buscar o perfil completo (aircraft + cabin_zones + cargo_holds + uld_positions) ao Supabase e reconstrói o `AircraftProfile` Pydantic. Devolve `None` se a matrícula não existir — quem chama decide o que fazer. Usa `.in_()` para ir buscar as posições de todos os porões de uma vez (evita N+1 queries), e `truststore` (também aplicado agora no arranque do `main.py`) para a mesma interceção TLS local do seed.
+- **`POST /api/v1/load-control/calculate`**: já não usa o `AHM565Parser` mockado — recebe `registration` no payload, vai buscar o perfil ao repositório, e devolve **404** limpo se a matrícula não existir. O `AHM565Parser` deixou de ser importado nas rotas de produção.
+- **Testes** (`test_api.py`): `get_aircraft_profile` é substituído por mock (`monkeypatch`, fixture `autouse`) que devolve o perfil real do TC-JNH — sem tocar na rede/Supabase real. Novo teste para o 404. Suite completa: **39/39 testes a passar**, isolada da rede.
+- **Verificação end-to-end real** (fora da suite de testes, com o Supabase verdadeiro): corri o servidor a sério e confirmei `POST /calculate` com `TC-JNH` + 4800kg PMC em `11P` devolve `LIZFW=49.9072` — o mesmo valor exato calculado anteriormente com o parser mockado, provando que os dados semeados no Supabase e reconstruídos pelo repositório batem certo com a fonte original. `XX-YYY` (matrícula inexistente) devolve 404 como esperado.
+
+### A minha opinião no momento
+
+- Os testes automáticos (pytest) continuam **sem tocar na rede real** de propósito — usam mock do repositório. A verificação end-to-end genuína (servidor real + Supabase real) foi feita manualmente uma vez para provar que o circuito fecha a sério, não fica só provado "no papel" pelos mocks. Isto não substitui um teste de integração automatizado contra uma DB de teste — fica como próximo passo se quisermos isso em CI.
+- `check_weight_limits` continua a usar o mesmo `zfw` para `zfw`/`tow`/`law` — essa simplificação (já registada antes) mantém-se, não resolvida aqui.
+- `POST /api/v1/aircraft/profile` continua só a validar, sem gravar — ficou fora do pedido desta vez (só o `/calculate` tinha de deixar de ser hardcoded).
+
 ## Próximos passos possíveis (não decididos)
-- [ ] Ligar `/api/v1/load-control/calculate` a dados reais do Supabase (por registration), em vez do TC-JNH sempre mockado
 - [ ] Ligar `POST /api/v1/aircraft/profile` à gravação no Supabase (reutilizando a lógica de `scripts/seed_tcjnh.py`)
+- [ ] Teste de integração automatizado (não só mock) contra uma DB de teste/staging, para cobrir em CI o que hoje só foi verificado manualmente
 - [ ] Parsing real de secções do AHM 565 (C: index/MAC/CG limits; D: holds/cabin; E: DOW/DOI por registration) em vez de dados hardcoded
 - [ ] Estrutura real de mensagem telex para `ahm560_parser.py` (falta uma amostra real)
 - [ ] Decidir se `BalanceCalculator` passa a trabalhar sobre `AircraftProfile` (envelope + holds + zonas) em vez de parâmetros soltos
