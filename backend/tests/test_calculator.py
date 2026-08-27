@@ -148,3 +148,29 @@ def test_zfw_end_to_end_with_cargo_and_passengers(tcjnh_envelope, tcjnh_cargo_ho
 
     # %MACZFW tem de cair num envelope de voo fisicamente plausível
     assert 15.0 <= mac_zfw <= 40.0
+
+
+def test_tow_and_ldw_from_fuel(tcjnh_envelope):
+    calc = BalanceCalculator(tcjnh_envelope)
+    zfw = 152015.0
+
+    tow = calc.calculate_tow(zfw, take_off_fuel=60000.0)
+    ldw = calc.calculate_ldw(tow, trip_fuel=32000.0)
+
+    assert tow == zfw + 60000.0
+    assert ldw == tow - 32000.0
+
+    limits = calc.check_weight_limits(zfw=zfw, tow=tow, law=ldw)
+    assert limits["tow_ok"] is True
+    assert limits["law_ok"] is True
+
+
+def test_tow_over_mtow_is_flagged(tcjnh_envelope):
+    calc = BalanceCalculator(tcjnh_envelope)
+    zfw = 175000.0  # já no MZFW
+
+    tow = calc.calculate_tow(zfw, take_off_fuel=60000.0)  # 235000 > MTOW 233000
+    limits = calc.check_weight_limits(zfw=zfw, tow=tow, law=zfw)
+
+    assert limits["tow_ok"] is False
+    assert limits["all_cleared"] is False

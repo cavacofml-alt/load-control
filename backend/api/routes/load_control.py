@@ -19,25 +19,42 @@ class HoldLoadItem(BaseModel):
 
 class CalculateRequest(BaseModel):
     registration: str
+    take_off_fuel: float = Field(..., ge=0)
+    trip_fuel: float = Field(..., ge=0)
     pax_loads: dict[str, dict[str, int] | float] = Field(default_factory=dict)
     hold_loads: dict[str, HoldLoadItem] = Field(default_factory=dict)
 
 
 class CalculateResponse(BaseModel):
     zfw: float
+    tow: float
+    ldw: float
     lizfw: float
     mac_zfw: float
     zfw_within_limits: bool
+    tow_within_limits: bool
+    ldw_within_limits: bool
+    within_limits: bool
 
 
 @router.post("/calculate", response_model=CalculateResponse)
 def calculate(payload: CalculateRequest) -> CalculateResponse:
-    """Calcula ZFW/LIZFW/%MACZFW a partir de carga nos porões e passageiros,
-    para a aeronave identificada por `registration` (perfil lido do Supabase).
+    """Calcula ZFW/TOW/LDW/LIZFW/%MACZFW a partir de combustível, carga nos
+    porões e passageiros, para a aeronave identificada por `registration`
+    (perfil lido do Supabase).
 
     Corre `LoadService` (overlap + compatibilidade de ULD) antes de calcular;
-    qualquer violação estrutural devolve 422 em vez de um resultado inválido.
+    uma violação estrutural de ULD devolve 422. Exceder um limite de peso
+    (ZFW/TOW/LDW) NÃO bloqueia o cálculo — devolve os valores reais com as
+    flags `*_within_limits` a false, para o operador ver os números mesmo
+    quando estão fora do envelope, tal como já acontecia só para o ZFW.
     """
+    if payload.trip_fuel > payload.take_off_fuel:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Trip fuel ({payload.trip_fuel}kg) não pode exceder o Take-Off fuel ({payload.take_off_fuel}kg).",
+        )
+
     try:
         profile = get_aircraft_profile(payload.registration)
     except Exception:
@@ -66,6 +83,20 @@ def calculate(payload: CalculateRequest) -> CalculateResponse:
 
     cg_zfw = calculator.calculate_cg(total_weight=zfw, total_index=lizfw)
     mac_zfw = calculator.calculate_mac_percentage(cg_zfw)
-    limits = calculator.check_weight_limits(zfw=zfw, tow=zfw, law=zfw)
 
-    return CalculateResponse(zfw=zfw, lizfw=lizfw, mac_zfw=mac_zfw, zfw_within_limits=limits["zfw_ok"])
+    tow = calculator.calculate_tow(zfw, payload.take_off_fuel)
+    ldw = calculator.calculate_ldw(tow, payload.trip_fuel)
+
+    limits = calculator.check_weight_limits(zfw=zfw, tow=tow, law=ldw)
+
+    return CalculateResponse(
+        zfw=zfw,
+        tow=tow,
+        ldw=ldw,
+        lizfw=lizfw,
+        mac_zfw=mac_zfw,
+        zfw_within_limits=limits["zfw_ok"],
+        tow_within_limits=limits["tow_ok"],
+        ldw_within_limits=limits["law_ok"],
+        within_limits=limits["all_cleared"],
+    )

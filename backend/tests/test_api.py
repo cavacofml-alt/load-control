@@ -35,22 +35,61 @@ def test_health_check():
     assert response.status_code == 200
 
 
+def test_calculate_missing_fuel_fields_returns_422():
+    # take_off_fuel/trip_fuel são obrigatórios
+    response = client.post("/api/v1/load-control/calculate", json={"registration": "TC-JNH"})
+    assert response.status_code == 422
+
+
 def test_calculate_unknown_registration_returns_404():
-    response = client.post("/api/v1/load-control/calculate", json={"registration": "XX-YYY"})
+    payload = {"registration": "XX-YYY", "take_off_fuel": 0, "trip_fuel": 0}
+    response = client.post("/api/v1/load-control/calculate", json=payload)
     assert response.status_code == 404
 
 
-def test_calculate_empty_payload_returns_dow_based_zfw():
-    response = client.post("/api/v1/load-control/calculate", json={"registration": "TC-JNH"})
+def test_calculate_zero_fuel_returns_dow_based_weights():
+    payload = {"registration": "TC-JNH", "take_off_fuel": 0, "trip_fuel": 0}
+    response = client.post("/api/v1/load-control/calculate", json=payload)
     assert response.status_code == 200
     data = response.json()
-    assert data["zfw"] == 125187.0  # DOW puro do TC-JNH, sem carga/pax
+    assert data["zfw"] == 125187.0  # DOW puro do TC-JNH, sem carga/pax/combustível
+    assert data["tow"] == 125187.0
+    assert data["ldw"] == 125187.0
     assert data["zfw_within_limits"] is True
+    assert data["within_limits"] is True
+
+
+def test_calculate_fuel_produces_real_tow_and_ldw():
+    payload = {"registration": "TC-JNH", "take_off_fuel": 60000, "trip_fuel": 32000}
+    response = client.post("/api/v1/load-control/calculate", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["tow"] == data["zfw"] + 60000
+    assert data["ldw"] == data["tow"] - 32000
+
+
+def test_calculate_trip_fuel_over_take_off_fuel_returns_422():
+    payload = {"registration": "TC-JNH", "take_off_fuel": 20000, "trip_fuel": 25000}
+    response = client.post("/api/v1/load-control/calculate", json=payload)
+    assert response.status_code == 422
+
+
+def test_calculate_tow_over_limit_flags_but_does_not_block():
+    # MTOW real do TC-JNH é 233000kg; DOW (125187) + 120000 de fuel excede-o.
+    payload = {"registration": "TC-JNH", "take_off_fuel": 120000, "trip_fuel": 10000}
+    response = client.post("/api/v1/load-control/calculate", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["tow"] > 233000
+    assert data["tow_within_limits"] is False
+    assert data["within_limits"] is False
 
 
 def test_calculate_valid_cargo_and_pax_returns_200():
     payload = {
         "registration": "TC-JNH",
+        "take_off_fuel": 60000,
+        "trip_fuel": 32000,
         "pax_loads": {"0A": {"ADULT": 20}, "0B": {"ADULT": 100}, "0C": {"ADULT": 100}},
         "hold_loads": {"11P": {"uld_type": "PMC", "weight": 4800.0}},
     }
@@ -63,7 +102,12 @@ def test_calculate_valid_cargo_and_pax_returns_200():
 
 def test_calculate_incompatible_uld_returns_422():
     # PAG a 4800kg excede o limite real do próprio tipo (4626kg) em 11P
-    payload = {"registration": "TC-JNH", "hold_loads": {"11P": {"uld_type": "PAG", "weight": 4800.0}}}
+    payload = {
+        "registration": "TC-JNH",
+        "take_off_fuel": 60000,
+        "trip_fuel": 32000,
+        "hold_loads": {"11P": {"uld_type": "PAG", "weight": 4800.0}},
+    }
     response = client.post("/api/v1/load-control/calculate", json=payload)
     assert response.status_code == 422
 
@@ -71,6 +115,8 @@ def test_calculate_incompatible_uld_returns_422():
 def test_calculate_overlap_returns_422():
     payload = {
         "registration": "TC-JNH",
+        "take_off_fuel": 60000,
+        "trip_fuel": 32000,
         "hold_loads": {
             "11L": {"uld_type": "AKE", "weight": 1200.0},
             "11": {"uld_type": "PLA", "weight": 3000.0},
@@ -81,7 +127,12 @@ def test_calculate_overlap_returns_422():
 
 
 def test_calculate_unknown_position_returns_422():
-    payload = {"registration": "TC-JNH", "hold_loads": {"99Z": {"uld_type": "AKE", "weight": 1000.0}}}
+    payload = {
+        "registration": "TC-JNH",
+        "take_off_fuel": 60000,
+        "trip_fuel": 32000,
+        "hold_loads": {"99Z": {"uld_type": "AKE", "weight": 1000.0}},
+    }
     response = client.post("/api/v1/load-control/calculate", json=payload)
     assert response.status_code == 422
 

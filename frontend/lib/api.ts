@@ -5,15 +5,22 @@ export interface HoldLoadItem {
 
 export interface CalculateRequest {
   registration: string;
+  take_off_fuel: number;
+  trip_fuel: number;
   pax_loads?: Record<string, Record<string, number> | number>;
   hold_loads?: Record<string, HoldLoadItem>;
 }
 
 export interface CalculateResponse {
   zfw: number;
+  tow: number;
+  ldw: number;
   lizfw: number;
   mac_zfw: number;
   zfw_within_limits: boolean;
+  tow_within_limits: boolean;
+  ldw_within_limits: boolean;
+  within_limits: boolean;
 }
 
 export class ApiError extends Error {

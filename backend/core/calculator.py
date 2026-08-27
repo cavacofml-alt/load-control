@@ -173,6 +173,20 @@ class BalanceCalculator:
 
         return round(self.aircraft.doi + index_delta, 5)
 
+    def calculate_tow(self, zfw: float, take_off_fuel: float) -> float:
+        """Take-Off Weight = ZFW + combustível à descolagem.
+
+        NOTA: só soma peso — ainda não corrige o índice/CG pelo efeito do
+        combustível (isso exigiria a tabela de índice por tanque da Secção C
+        do AHM565, não implementada). LIZFW/%MACZFW continuam a refletir só
+        o estado de ZFW, não o TOW.
+        """
+        return round(zfw + take_off_fuel, 2)
+
+    def calculate_ldw(self, tow: float, trip_fuel: float) -> float:
+        """Landing Weight = TOW - combustível consumido em rota (trip fuel)."""
+        return round(tow - trip_fuel, 2)
+
     def check_weight_limits(self, zfw: float, tow: float, law: float) -> dict:
         """Valida os pesos contra os limites estruturais da aeronave."""
         return {

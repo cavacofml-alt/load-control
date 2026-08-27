@@ -35,12 +35,15 @@ const AIRCRAFT = {
   mlaw: 187000,
 };
 
-// TOW/LDW não são calculados pelo backend (sem input de combustível ainda) —
-// mantidos como estimativa fixa, marcados como tal na UI.
-const TOW_LDW_ESTIMATE = {
-  tow: { actual: 210400, limit: AIRCRAFT.mtow },
-  ldw: { actual: 179800, limit: AIRCRAFT.mlaw },
-};
+// Combustível por defeito (kg) — só valores iniciais para os inputs.
+const DEFAULT_TAKE_OFF_FUEL = 60000;
+const DEFAULT_TRIP_FUEL = 32000;
+
+// O backend não calcula o efeito do combustível no índice/CG (precisaria da
+// tabela de índice por tanque da Secção C do AHM565) — por isso a posição
+// horizontal (%MAC) do TOW/LDW no envelope continua estimada, mesmo que o
+// peso (vertical) já seja real.
+const MAC_ESTIMATE = { tow: 27.4, ldw: 25.8 };
 
 const INITIAL_CABIN_ZONES = [
   { code: "0A", label: "Zona 0A · FWD", capacity: 28, pax: 24 },
@@ -69,13 +72,6 @@ const ENVELOPE_POLYGON = [
   { mac: 18, weight: 110000 },
 ];
 
-// Pontos de TOW/LDW mock (o backend ainda não devolve index/%MAC para estes,
-// já que não calcula TOW/LDW) — só o ponto de ZFW é real/dinâmico.
-const TOW_LDW_POINTS = [
-  { mac: 27.4, weight: TOW_LDW_ESTIMATE.tow.actual, label: "TOW" },
-  { mac: 25.8, weight: TOW_LDW_ESTIMATE.ldw.actual, label: "LDW" },
-];
-
 const DEBOUNCE_MS = 500;
 
 // ---------------------------------------------------------------------------
@@ -96,12 +92,10 @@ function WeightGauge({
   label,
   actual,
   limit,
-  estimated = false,
 }: {
   label: string;
   actual: number;
   limit: number;
-  estimated?: boolean;
 }) {
   const ratio = actual / limit;
   const pct = Math.min(ratio, 1) * 100;
@@ -110,11 +104,6 @@ function WeightGauge({
       <div className="flex items-baseline justify-between">
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
           {label}
-          {estimated && (
-            <span className="ml-1.5 rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-medium normal-case tracking-normal text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-              estimativa
-            </span>
-          )}
         </span>
         <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
           {formatKg(actual)} <span className="text-slate-400 dark:text-slate-500">/ {formatKg(limit)}</span>
@@ -151,6 +140,8 @@ function SectionCard({ title, children }: { title: string; children: React.React
 export default function Home() {
   const [cabinZones, setCabinZones] = useState(INITIAL_CABIN_ZONES);
   const [cargoRows, setCargoRows] = useState(INITIAL_CARGO_ROWS);
+  const [takeOffFuel, setTakeOffFuel] = useState(DEFAULT_TAKE_OFF_FUEL);
+  const [tripFuel, setTripFuel] = useState(DEFAULT_TRIP_FUEL);
 
   const [result, setResult] = useState<CalculateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -186,6 +177,8 @@ export default function Home() {
       try {
         const response = await calculateLoad({
           registration: FLIGHT.registration,
+          take_off_fuel: takeOffFuel,
+          trip_fuel: tripFuel,
           pax_loads,
           hold_loads,
         });
@@ -206,15 +199,23 @@ export default function Home() {
     }, DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [cabinZones, cargoRows]);
+  }, [cabinZones, cargoRows, takeOffFuel, tripFuel]);
 
-  const isSecure = result !== null && result.zfw_within_limits && error === null;
+  const isSecure = result !== null && result.within_limits && error === null;
   const badgeLabel = loading && result === null ? "A CALCULAR…" : isSecure ? "FLIGHT SECURE" : "OUT OF LIMITS";
   const badgeIsNeutral = loading && result === null;
 
   const zfwPoint = result
     ? { mac: result.mac_zfw, weight: result.zfw, label: "ZFW" }
     : null;
+
+  // TOW/LDW: peso real quando há resultado, senão uma estimativa a partir do
+  // DOW + combustível introduzido. O %MAC continua estimado em ambos os casos
+  // (ver nota sobre MAC_ESTIMATE acima).
+  const towWeight = result?.tow ?? AIRCRAFT.dow + takeOffFuel;
+  const ldwWeight = result?.ldw ?? AIRCRAFT.dow + takeOffFuel - tripFuel;
+  const towPoint = { mac: MAC_ESTIMATE.tow, weight: towWeight, label: "TOW" };
+  const ldwPoint = { mac: MAC_ESTIMATE.ldw, weight: ldwWeight, label: "LDW" };
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-slate-50 font-sans text-slate-900 dark:bg-slate-950 dark:text-slate-100">
@@ -268,6 +269,31 @@ export default function Home() {
               {error}
             </div>
           )}
+
+          <SectionCard title="Combustível">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] text-slate-400 dark:text-slate-500">Take-Off Fuel (kg)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={takeOffFuel}
+                  onChange={(e) => setTakeOffFuel(Number(e.target.value))}
+                  className="rounded-md border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-700"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] text-slate-400 dark:text-slate-500">Trip Fuel (kg)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={tripFuel}
+                  onChange={(e) => setTripFuel(Number(e.target.value))}
+                  className="rounded-md border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-700"
+                />
+              </div>
+            </div>
+          </SectionCard>
 
           <SectionCard title="Distribuição de Passageiros">
             <div className="flex flex-col gap-3">
@@ -363,21 +389,11 @@ export default function Home() {
 
               <div className="flex justify-center text-slate-300 dark:text-slate-700">↓</div>
 
-              <WeightGauge
-                label="TOW"
-                actual={TOW_LDW_ESTIMATE.tow.actual}
-                limit={TOW_LDW_ESTIMATE.tow.limit}
-                estimated
-              />
+              <WeightGauge label="TOW" actual={towWeight} limit={AIRCRAFT.mtow} />
 
               <div className="flex justify-center text-slate-300 dark:text-slate-700">↓</div>
 
-              <WeightGauge
-                label="LDW"
-                actual={TOW_LDW_ESTIMATE.ldw.actual}
-                limit={TOW_LDW_ESTIMATE.ldw.limit}
-                estimated
-              />
+              <WeightGauge label="LDW" actual={ldwWeight} limit={AIRCRAFT.mlaw} />
 
               {result && (
                 <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
@@ -424,9 +440,11 @@ export default function Home() {
                     isAnimationActive={false}
                     name="Envelope"
                   />
-                  {/* TOW/LDW são mock (backend não os calcula ainda) */}
-                  <Scatter data={TOW_LDW_POINTS} dataKey="weight" fill="#94a3b8" name="TOW/LDW (estimativa)" />
-                  {/* ZFW é o único ponto real, vindo do /calculate */}
+                  {/* TOW/LDW: peso real (ou estimado a partir do combustível se
+                      ainda não houver resposta), mas %MAC continua estimado —
+                      o backend não calcula o efeito do combustível no índice. */}
+                  <Scatter data={[towPoint, ldwPoint]} dataKey="weight" fill="#94a3b8" name="TOW/LDW (MAC estimado)" />
+                  {/* ZFW é o único ponto totalmente real (peso e %MAC), vindo do /calculate */}
                   {zfwPoint && <Scatter data={[zfwPoint]} dataKey="weight" fill="#2563eb" name="ZFW" />}
                 </ComposedChart>
               </ResponsiveContainer>
@@ -438,7 +456,7 @@ export default function Home() {
               </span>
               <span className="flex items-center gap-1">
                 <span className="h-2 w-2 rounded-full bg-slate-400" />
-                TOW / LDW (estimativa)
+                TOW / LDW (%MAC estimado)
               </span>
             </div>
           </SectionCard>
