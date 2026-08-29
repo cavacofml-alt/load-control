@@ -63,3 +63,44 @@ class AircraftProfile(BaseModel):
     envelope: AircraftEnvelope
     cabin_zones: list[CabinZone] = Field(default_factory=list)
     cargo_holds: list[CargoHold] = Field(default_factory=list)
+
+
+class Flight(BaseModel):
+    id: str
+    flight_number: str = Field(..., max_length=10)
+    origin: str = Field(..., max_length=4, description="ICAO")
+    destination: str = Field(..., max_length=4, description="ICAO")
+    std: str = Field(..., description="Scheduled Time of Departure, ISO 8601")
+    status: Literal["SCHEDULED", "CLOSED", "DEPARTED", "CANCELLED"]
+    aircraft_registration: str | None = Field(
+        None, description="None se o voo ainda não tiver aeronave atribuída."
+    )
+
+
+class Loadsheet(BaseModel):
+    """Espelha uma linha da tabela `loadsheets` (ledger append-only — ver
+    migração `20260826010000_users_flights_loadsheets.sql`).
+
+    `tow_cg`/`tow_mac` ficam `None` até o motor de cálculo suportar o efeito
+    do combustível no índice (Secção C do AHM565) — uma loadsheet com estes
+    campos a `None` não é uma loadsheet certificada, só um registo de demonstração.
+    `law` é o nome da coluna na base de dados para o Landing Weight (LDW).
+    """
+
+    id: str
+    flight_id: str
+    version: int
+    supersedes_id: str | None = None
+    document_type: Literal["FINAL", "LMC"]
+
+    zfw: float
+    tow: float
+    law: float
+    zfw_cg: float
+    zfw_mac: float
+    tow_cg: float | None = None
+    tow_mac: float | None = None
+    total_index: float
+
+    signed_by: str
+    signed_at: str

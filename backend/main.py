@@ -11,7 +11,7 @@ from dotenv import load_dotenv  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
-from api.routes import aircraft, load_control  # noqa: E402
+from api.routes import aircraft, flights, load_control, loadsheets  # noqa: E402
 
 load_dotenv()
 
@@ -31,6 +31,8 @@ app.add_middleware(
 
 app.include_router(aircraft.router)
 app.include_router(load_control.router)
+app.include_router(flights.router)
+app.include_router(loadsheets.router)
 
 
 @app.get("/health")
